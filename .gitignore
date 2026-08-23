@@ -1,0 +1,10 @@
+# 环境与密钥（绝不提交）
+.env
+.venv/
+__pycache__/
+.idea/
+.DS_Store
+
+# 生成的结果与中间产物（可重新生成）
+results/
+data/*.xlsx
