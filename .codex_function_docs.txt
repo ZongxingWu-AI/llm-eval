@@ -1,0 +1,146 @@
+core/data_io.py::read_jsonl::读取一个 JSONL 文件，并把它变成字典列表。
+core/data_io.py::write_jsonl::把字典序列写成 JSONL 文件。
+core/json_utils.py::_balanced_candidates::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+core/json_utils.py::parse_json_value::从模型输出中提取第一个有效的 JSON 对象或数组。
+core/json_utils.py::parse_json_object::解析并校验模型输出必须是 JSON 对象。它复用 parse_json_value，拒绝数组和基础类型。
+core/llm_client.py::load_env::读取 .env 文件，把里面的变量装进环境变量。
+core/llm_client.py::read_role::读取某个角色的三项配置：base_url、api_key、model。
+core/llm_client.py::is_role_configured::判断某个角色是否显式配置了。
+core/llm_client.py::build_client::用给定的地址和 key 创建 openai 客户端对象。
+core/llm_client.py::call_model::调用一次模型，带 3 次重试。
+core/prompt_loader.py::load_template::从指定 Prompt 目录读取 Markdown 模板。调用前提供文件名和可选目录，调用后返回完整模板文本，文件不存在时抛出 FileNotFoundError。
+core/prompt_loader.py::render::替换 Prompt 模板中的占位符。调用前是模板字符串和字段映射，调用后是可以直接发送给模型的完整 Prompt。
+core/run_metadata.py::new_run_metadata::创建一次运行记录的基础元数据。调用后返回包含 track、时间和调用参数的字典，供结果目录中的 run_metadata.json 保存。
+core/run_metadata.py::timestamped_run_dir::在结果根目录下创建带时间戳的运行目录。调用前是结果根目录，调用后返回新目录路径并确保目录已经存在。
+tests/test_ceval.py::test_extracts_answer_from_common_response_shapes::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_ceval.py::test_minimal_evaluation_scores_answer::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_core_json_utils.py::test_parses_fenced_json_object::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_core_json_utils.py::test_parses_json_embedded_in_explanation::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_core_json_utils.py::test_parses_fenced_json_array::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_core_json_utils.py::test_rejects_missing_json_object::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_documentation.py::_has_chinese::判断文本是否至少包含一个中文字符。
+tests/test_documentation.py::_python_files::收集需要检查的 Python 文件。
+tests/test_documentation.py::test_every_python_file_has_chinese_module_docstring::每个 Python 文件都必须有中文模块说明。
+tests/test_documentation.py::test_every_function_has_chinese_docstring::每个普通函数、异步函数和方法都必须有中文说明。
+tests/test_documentation.py::test_function_docstrings_are_specific_and_not_template_text::禁止使用没有说明真实业务的模板注释。
+tests/test_documentation.py::test_required_readmes_and_field_names_exist::每个数据相关目录都必须有字段级 README 和最小示例说明。
+tests/test_legal_dataset_build.py::_draft::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tests/test_legal_dataset_build.py::test_build_keeps_all_questions_from_one_case_in_one_split::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_dataset_build.py::test_build_rejects_uncontrolled_risk_label::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_dataset_build.py::test_build_rejects_uncontrolled_case_taxonomy::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_evaluation.py::setUp::为当前测试准备独立的临时目录、样例数据或 mock 环境。
+tests/test_legal_evaluation.py::test_evaluate_questions_uses_new_schema_and_records_call_metadata::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_evaluation.py::test_report_groups_by_split_and_task_type::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_evaluation.py::test_run_writes_only_to_requested_legal_output::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_ingestion.py::test_parsing_is_lossless_and_preserves_legal_sections::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_ingestion.py::test_extracts_all_named_parties::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_ingestion.py::test_records_hash_and_quality_metadata::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_manifest.py::test_same_filename_with_changed_content_is_reprocessed::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_scorer.py::test_rule_scoring_uses_new_rubric_fields::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_scorer.py::test_rule_scoring_rejects_when_penalty_is_hit::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_scorer.py::test_redline_accepts_explicit_refusal::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_scorer.py::test_rubric_judge_uses_core_json_parser::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_scorer.py::test_score_one_routes_new_method_names::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_taxonomy.py::test_default_leaf_is_in_controlled_taxonomy::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_validation.py::setUp::为当前测试准备独立的临时目录、样例数据或 mock 环境。
+tests/test_legal_validation.py::test_source_quote_must_exist_in_named_section::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_legal_validation.py::test_same_case_cannot_cross_splits::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_module_cli.py::test_all_tracks_import_without_legacy_packages::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_module_cli.py::test_all_documented_clis_support_help::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_pairwise.py::test_parses_fenced_json::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_pairwise.py::test_position_swap_maps_second_round_back_to_original_contestants::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_pairwise.py::test_disagreement_after_position_swap_flags_position_bias::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_pairwise.py::test_majority_vote::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_pairwise.py::test_bias_statistics_preserve_expected_counts::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_real_case_parties.py::test_role_lines_do_not_turn_narrative_sentences_into_parties::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_split.py::test_assigns_case_level_stratified_splits_deterministically::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_split.py::test_keeps_existing_case_split_for_all_questions::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_split_case_classification.py::test_stratifies_generated_questions_using_case_classification::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tests/test_track_paths.py::test_each_track_has_its_own_results_root::验证一个预期行为，失败时应优先检查断言对应的实现边界。
+tools/export_excel.py::_flatten::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tools/export_excel.py::export_jsonl::读取 JSONL 并导出为 Excel 工作簿。
+tools/export_excel.py::discover_jsonl::扫描指定目录下可以导出的 JSONL 文件。调用后返回排序后的文件路径列表，不读取或修改文件内容。
+tools/export_excel.py::main::完成当前模块中的一个处理步骤。
+tracks/ceval/evaluate.py::build_prompt::把 C-Eval 单道题的题干和选项拼成统一 Prompt。调用前是包含 question 与 A-D 的题目字典，调用后是要求模型只返回选项字母的文本。
+tracks/ceval/evaluate.py::extract_answer::从 C-Eval 模型原始输出中提取规范化选项字母。
+tracks/ceval/evaluate.py::evaluate_rows::逐题调用模型并计算 C-Eval 结果。
+tracks/ceval/evaluate.py::run::完成当前模块中的一个处理步骤。
+tracks/ceval/evaluate.py::main::完成当前模块中的一个处理步骤。
+tracks/ceval/fetch.py::_sanitize_no_proxy::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/ceval/fetch.py::fetch_rows::下载或读取指定 C-Eval 科目的题目。调用前是科目名、数据 split 和数量限制，调用后返回标准化题目字典列表。
+tracks/ceval/fetch.py::main::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/dataset/build.py::_taxonomy_valid::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/legal_benchmark/dataset/build.py::build::从候选题组装正式题集，并补充题号和案件级 split。
+tracks/legal_benchmark/dataset/build.py::run::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/dataset/build.py::main::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/dataset/split.py::_case_id::读取一条题目或案件记录的案件标识。
+tracks/legal_benchmark/dataset/split.py::_primary_category::读取案件级主分类，供分层抽样使用。
+tracks/legal_benchmark/dataset/split.py::assign_case_splits::按案件而不是题目分配 ``dev``、``calibration``、``test``。
+tracks/legal_benchmark/evaluation/run.py::evaluate_questions::逐题调用被测模型并完成法律题评分。
+tracks/legal_benchmark/evaluation/run.py::_counts_by::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/legal_benchmark/evaluation/run.py::build_report::把法律评测逐题结果汇总为 Markdown 报告。输入是带 split、任务类型和 verdict 的结果列表，输出是按总数和分组统计组织的报告文本。
+tracks/legal_benchmark/evaluation/run.py::_build_clients::根据题集中的评分方式创建被测模型和可选裁判客户端。
+tracks/legal_benchmark/evaluation/run.py::run::运行一次完整的法律 Benchmark，并隔离写入法律线结果目录。
+tracks/legal_benchmark/evaluation/run.py::main::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/extraction/extract.py::_sentences::把章节文本切成适合规则扫描的句子列表。
+tracks/legal_benchmark/extraction/extract.py::deterministic_extract::使用确定性规则提取争议焦点、证据判断和法院结论。
+tracks/legal_benchmark/extraction/extract.py::_valid_grounded_items::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/legal_benchmark/extraction/extract.py::extract_case::为一个案件补充带来源定位的结构化法律信息。
+tracks/legal_benchmark/extraction/extract.py::run::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/extraction/extract.py::main::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/generation/generate.py::_valid_evidence::筛选能够回溯到案件章节的题目证据。
+tracks/legal_benchmark/generation/generate.py::generate_one_case::调用生成模型，为一个案件生成候选题和错误记录。
+tracks/legal_benchmark/generation/generate.py::run::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/generation/generate.py::main::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/ingestion/clean.py::list_raw_files::列出原始判决书目录中的可处理文件。调用前是 raw 目录，调用后返回排序后的 md/txt 文件列表，并跳过 README。
+tracks/legal_benchmark/ingestion/clean.py::sha256_text::计算原文 UTF-8 编码的 SHA-256。调用前是完整文本，调用后返回固定长度哈希，用于识别内容变化和建立来源清单。
+tracks/legal_benchmark/ingestion/clean.py::extract_case_no::从判决书全文提取案号。调用前是原始文本，调用后返回规范化的中文括号案号；找不到时返回空字符串。
+tracks/legal_benchmark/ingestion/clean.py::_extract_date::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/legal_benchmark/ingestion/clean.py::_infer_procedure::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/legal_benchmark/ingestion/clean.py::_first_line_matching::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/legal_benchmark/ingestion/clean.py::_split_party_names::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/legal_benchmark/ingestion/clean.py::extract_parties::从带角色冒号的行中提取全部当事人和代理人。调用前是全文，调用后返回去重并带 party_id 的角色-姓名列表，不把叙述句误当成当事人。
+tracks/legal_benchmark/ingestion/clean.py::_marker_positions::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/legal_benchmark/ingestion/clean.py::split_sections::无损切分判决书主要章节。
+tracks/legal_benchmark/ingestion/clean.py::extract_statutes::提取全文中出现的法律条文表达。调用前是完整文本，调用后返回去重后的法条列表。
+tracks/legal_benchmark/ingestion/clean.py::extract_amounts::提取金额及货币表达。调用前是完整文本，调用后返回金额字符串列表，供后续人工审核和题目生成参考。
+tracks/legal_benchmark/ingestion/clean.py::extract_dates::提取中文和数字日期表达。调用前是完整文本，调用后返回日期字符串列表。
+tracks/legal_benchmark/ingestion/clean.py::extract_interest_expressions::提取包含利息、利率、LPR 或迟延履行利息的句子。调用前是完整文本，调用后返回相关表达列表。
+tracks/legal_benchmark/ingestion/clean.py::infer_category::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/ingestion/clean.py::infer_cause_path::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/ingestion/clean.py::anonymize_text::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/ingestion/clean.py::parse_judgment::把一份原始判决书转换为无损结构化案件。
+tracks/legal_benchmark/ingestion/clean.py::clean_directory::批量解析 raw 目录并写出 parsed JSONL 与来源 manifest。
+tracks/legal_benchmark/ingestion/clean.py::main::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/scoring/legal_scorer.py::_point_label::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/legal_benchmark/scoring/legal_scorer.py::_point_keywords::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/legal_benchmark/scoring/legal_scorer.py::_point_hit::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/legal_benchmark/scoring/legal_scorer.py::_matched::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/legal_benchmark/scoring/legal_scorer.py::score_by_rules::按 rubric 中的必答点、加分点和扣分点进行确定性评分。
+tracks/legal_benchmark/scoring/legal_scorer.py::score_redline::检查回答是否包含拒答或安全引导。
+tracks/legal_benchmark/scoring/legal_scorer.py::score_by_judge::调用 rubric judge 对开放式法律回答进行结构化评分。
+tracks/legal_benchmark/scoring/legal_scorer.py::score_one::按题目的 ``scoring_method`` 路由到具体评分器。
+tracks/legal_benchmark/taxonomy/__init__.py::load_taxonomy::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/taxonomy/__init__.py::allowed_values::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/taxonomy/__init__.py::validate_cause_path::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/taxonomy/__init__.py::infer_cause_path::根据案件文本和一级分类推断一个受控的案由路径。
+tracks/legal_benchmark/validation/validate.py::check_row::校验一道法律题的字段、标签、来源引用和案件级 split。
+tracks/legal_benchmark/validation/validate.py::validate::批量校验法律题集。输入是题目列表和可选案件列表，输出每题的 passed/failed 状态及问题说明。
+tracks/legal_benchmark/validation/validate.py::run::完成当前模块中的一个处理步骤。
+tracks/legal_benchmark/validation/validate.py::main::完成当前模块中的一个处理步骤。
+tracks/pairwise_judge/bias_stats.py::compute_stats::统计成对比较结果中的胜负、位置偏见和回答长度偏见。
+tracks/pairwise_judge/evaluate.py::_build_judges::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/pairwise_judge/evaluate.py::evaluate_rows::逐题调用模型并计算 C-Eval 结果。调用前是题目列表和客户端，调用后每道题增加预测答案、正确答案、是否正确、耗时和错误信息。
+tracks/pairwise_judge/evaluate.py::run::完成当前模块中的一个处理步骤。
+tracks/pairwise_judge/evaluate.py::main::完成当前模块中的一个处理步骤。
+tracks/pairwise_judge/generate_answers.py::generate::完成当前模块中的一个处理步骤。
+tracks/pairwise_judge/generate_answers.py::main::完成当前模块中的一个处理步骤。
+tracks/pairwise_judge/judge_prompt.py::build_judge_prompt::把题目和两份回答填入裁判 Prompt 模板。
+tracks/pairwise_judge/pairwise.py::parse_judge_json::解析裁判模型输出并要求得到 JSON 对象。解析失败时返回 None，避免单条坏结果中断整批评测。
+tracks/pairwise_judge/pairwise.py::normalize_winner::把裁判输出的 winner 字段统一成 ``A``、``B`` 或 ``tie``。
+tracks/pairwise_judge/pairwise.py::parse_score_total::完成当前模块中的一个处理步骤。
+tracks/pairwise_judge/pairwise.py::_error::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/pairwise_judge/pairwise.py::judge_one::对一条开放题回答执行两轮位置交换裁判。
+tracks/pairwise_judge/pairwise.py::majority_winner::汇总多个裁判的胜者标签。
+tracks/pairwise_judge/report.py::_build_report::为同一文件中的公开流程提供一个小而明确的辅助步骤。
+tracks/pairwise_judge/report.py::write_run::完成当前模块中的一个处理步骤。

@@ -1,0 +1,10 @@
+name: llm-eval
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - datasets
+  - openai
+  - python-dotenv
+  - openpyxl

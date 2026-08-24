@@ -1,10 +1,30 @@
-# 环境与密钥（绝不提交）
+# Secrets and local environments
 .env
 .venv/
 __pycache__/
+*.py[cod]
 .idea/
 .DS_Store
 
-# 生成的结果与中间产物（可重新生成）
-results/
-data/*.xlsx
+# Track-specific run outputs
+tracks/ceval/results/**
+!tracks/ceval/results/README.md
+tracks/pairwise_judge/results/**
+!tracks/pairwise_judge/results/README.md
+tracks/legal_benchmark/results/**
+!tracks/legal_benchmark/results/README.md
+
+# Legal source documents are local-only
+tracks/legal_benchmark/data/raw/**
+!tracks/legal_benchmark/data/raw/README.md
+
+# Reproducible legal intermediate artifacts
+tracks/legal_benchmark/data/parsed/**
+!tracks/legal_benchmark/data/parsed/README.md
+tracks/legal_benchmark/data/cleaned/**
+!tracks/legal_benchmark/data/cleaned/README.md
+tracks/legal_benchmark/data/drafts/**
+!tracks/legal_benchmark/data/drafts/README.md
+
+# Local spreadsheet exports
+*.xlsx
