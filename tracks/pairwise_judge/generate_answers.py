@@ -1,14 +1,7 @@
-"""项目模块：tracks/pairwise_judge/generate_answers.py。
+"""开放题候选回答生成模块。
 
-本文件属于三条评测线或公共工具层的一部分，负责完成本文件名对应的处理步骤。输入来自上游函数或数据目录，输出返回给下游函数或写入对应结果目录。
-
-项目位置：tracks/pairwise_judge/generate_answers.py。
-主要用途：开放题 LLM-as-Judge 评测线，负责生成回答、位置交换裁判、多裁判统计和报告。
-输入：输入来自本评测线的 data 目录、裁判 Prompt 和公共模型客户端。
-输出：输出写入本评测线的 results 目录，供偏见分析和报告阅读。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：生成和裁判模块会调用模型；统计和报告模块只处理内存数据或写结果文件。
-"""
+输入是问题 JSONL 和 CONTESTANT_A、CONTESTANT_B 两组模型配置，输出含 answer_a、answer_b 和模型元数据的回答 JSONL。
+产物交给 Pairwise evaluate；运行时会调用两个被测模型并写本评测线 data/results 指定位置。"""
 
 import argparse
 import json
@@ -24,11 +17,14 @@ from tracks.pairwise_judge.paths import DATA_ROOT
 
 def generate(input_path: str | Path | None = None, output_path: str | Path | None = None,
              max_items: int | None = None) -> list[dict]:
-    """完成当前模块中的一个处理步骤。
+    """用途：让两个选手模型分别回答开放题，并写出带原始选手身份的回答数据。
 
-参数：input_path、output_path、max_items。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：input_path、output_path 是问题和回答 JSONL；max_items 限制试跑题数。
+    输出：返回含 answer_a、answer_b、model_a、model_b 和 error 的列表。
+    运行前数据形态：运行前每行只有 id 和 question。
+    运行后数据变化：运行后每题新增两份回答、两个模型身份和错误字段。
+    副作用：读取环境变量，调用模型生成两位选手回答，并覆盖回答 JSONL 与 metadata。
+    异常或失败处理：单题模型异常写入 error 后继续；输入不存在时抛出 FileNotFoundError。"""
 
     source = Path(input_path) if input_path else DATA_ROOT / "judge_questions.jsonl"
     target = Path(output_path) if output_path else DATA_ROOT / "judge_answers.jsonl"
@@ -64,11 +60,12 @@ def generate(input_path: str | Path | None = None, output_path: str | Path | Non
 
 
 def main() -> None:
-    """完成当前模块中的一个处理步骤。
+    """用途：解析开放题回答生成 CLI 并调用 generate。
 
-参数：无。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：命令行 --input、--output、--max-items。
+    输出：成功打印输出路径；失败退出 1。
+    副作用：会调用两个选手模型并写文件。
+    异常或失败处理：捕获异常后打印 stderr 并 SystemExit(1)。"""
 
     parser = argparse.ArgumentParser(description="用两个选手模型生成开放题回答")
     parser.add_argument("--input", help="开放题 JSONL")

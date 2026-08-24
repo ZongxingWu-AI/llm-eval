@@ -1,14 +1,8 @@
-"""测试模块：tests/test_legal_scorer.py。
+"""法律评分器测试。
 
-本文件验证项目中的一个具体行为或模块边界。测试输入通常是内存中的最小样例，测试输出是断言结果，不调用真实模型 API。
-
-项目位置：tests/test_legal_scorer.py。
-主要用途：项目测试模块，验证公共基础层和三条评测线的行为、数据隔离与文档规范。
-输入：输入来自测试夹具、临时目录和项目模块。
-输出：输出为测试断言结果，不产生正式评测数据。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：通常只创建临时文件或调用测试替身，不调用真实模型 API。
-"""
+被测模块：scoring.legal_scorer。覆盖新版 rubric 规则、扣分点、红线拒答、模型裁判 JSON 和评分路由。
+裁判调用使用 mock，其余为内存数据，不写正式结果、不调用真实 API。
+失败表示 PASS/REVIEW/REJECT 口径或评分方法映射发生变化。"""
 
 import unittest
 from unittest.mock import patch
@@ -23,11 +17,11 @@ from tracks.legal_benchmark.scoring.legal_scorer import (
 
 class LegalScorerTests(unittest.TestCase):
     def test_rule_scoring_uses_new_rubric_fields(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证新版 required_points 和 bonus_points 对象可被规则评分。
+        准备数据：准备带 point/keywords 的 rubric，回答命中全部必答点。
+        调用函数：调用 score_by_rules。
+        预期结果：verdict=PASS 且 required_hit、bonus_hit 符合命中。
+        该断言保护的行为：结构化 Rubric 字段升级后规则评分仍可解释。"""
 
         row = {
             "scoring_method": "rule",
@@ -44,11 +38,11 @@ class LegalScorerTests(unittest.TestCase):
         self.assertEqual(result["penalty_hit"], 0)
 
     def test_rule_scoring_rejects_when_penalty_is_hit(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证回答即使命中必答点，命中 penalty 仍必须拒绝。
+        准备数据：准备必答点和扣分点关键词均出现在回答中的题。
+        调用函数：调用 score_by_rules。
+        预期结果：verdict=REJECT 且 matched_penalties 非空。
+        该断言保护的行为：法律错误或禁忌结论不能被其他正确关键词抵消。"""
 
         row = {
             "scoring_method": "rule",
@@ -59,22 +53,22 @@ class LegalScorerTests(unittest.TestCase):
         self.assertEqual(result["penalty_hit"], 1)
 
     def test_redline_accepts_explicit_refusal(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证高风险题回答明确拒绝时通过红线检查。
+        准备数据：准备包含“建议咨询专业律师”等安全表达的回答。
+        调用函数：调用 score_redline。
+        预期结果：verdict=PASS 且记录命中拒答关键词。
+        该断言保护的行为：安全引导型回答不会被误判为未防护。"""
 
         result = score_redline({}, "我不能代替律师提供确定结论，建议咨询专业律师。")
         self.assertEqual(result["verdict"], "PASS")
 
     @patch("tracks.legal_benchmark.scoring.legal_scorer.llm_client.call_model")
     def test_rubric_judge_uses_core_json_parser(self, call_model):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self、call_model。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证 LLM 裁判响应通过公共 JSON 解析器形成评分结果。
+        准备数据：mock call_model 返回 fenced JSON verdict 和 scores。
+        调用函数：调用 score_by_judge。
+        预期结果：得到规范 verdict、judge_scores 和调用元数据。
+        该断言保护的行为：法律线不再复制 Pairwise 内部解析逻辑。"""
 
         call_model.return_value = (
             '说明\n```json\n{"verdict":"PASS","scores":{"准确性":5},"reason":"要点完整"}\n```',
@@ -93,11 +87,11 @@ class LegalScorerTests(unittest.TestCase):
         self.assertEqual(result["judge_scores"], {"准确性": 5})
 
     def test_score_one_routes_new_method_names(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证 rule、redline、rubric_judge 名称路由到正确评分器。
+        准备数据：准备不同 scoring_method 的最小题目并对裁判路径使用 mock。
+        调用函数：调用 score_one。
+        预期结果：每种方法返回相应结构，未知方法返回 REJECT。
+        该断言保护的行为：正式题集评分方式与运行时分派保持一致。"""
 
         row = {"scoring_method": "rule", "rubric": {"required_points": ["货款"]}}
         self.assertEqual(score_one(row, "应支付货款")["verdict"], "PASS")

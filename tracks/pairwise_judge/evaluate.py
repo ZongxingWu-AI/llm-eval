@@ -1,14 +1,8 @@
-"""项目模块：tracks/pairwise_judge/evaluate.py。
+"""开放题 Pairwise Judge 执行模块。
 
-本文件属于三条评测线或公共工具层的一部分，负责完成本文件名对应的处理步骤。输入来自上游函数或数据目录，输出返回给下游函数或写入对应结果目录。
-
-项目位置：tracks/pairwise_judge/evaluate.py。
-主要用途：开放题 LLM-as-Judge 评测线，负责生成回答、位置交换裁判、多裁判统计和报告。
-输入：输入来自本评测线的 data 目录、裁判 Prompt 和公共模型客户端。
-输出：输出写入本评测线的 results 目录，供偏见分析和报告阅读。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：生成和裁判模块会调用模型；统计和报告模块只处理内存数据或写结果文件。
-"""
+输入是问题与两位选手回答、一个或多个裁判模型配置，输出双轮位置交换结果、偏见统计和报告。
+模块分离裁判调用、有效结果过滤与多数投票，并把位置标签映射回原始选手。
+运行时调用裁判模型，只写 Pairwise 自己的 results 目录。"""
 
 import argparse
 import sys
@@ -22,11 +16,12 @@ from tracks.pairwise_judge.paths import DATA_ROOT
 
 
 def _build_judges() -> list[tuple]:
-    """为同一文件中的公开流程提供一个小而明确的辅助步骤。
+    """用途：根据 JUDGE、JUDGE_2、JUDGE_3 创建启用的裁判列表。
 
-参数：无。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：无参数，读取角色环境变量。
+    输出：返回 (client, model) 元组列表。
+    副作用：读取环境变量并创建客户端；不调用模型。
+    异常或失败处理：主裁判缺 key 时退出；可选裁判未显式配置则跳过。"""
 
     judges: list[tuple] = []
     for prefix in ("JUDGE", "JUDGE_2", "JUDGE_3"):
@@ -38,7 +33,14 @@ def _build_judges() -> list[tuple]:
 
 
 def evaluate_rows(rows: list[dict], judges: list[tuple]) -> list[dict]:
-    """逐题调用模型并计算 C-Eval 结果。调用前是题目列表和客户端，调用后每道题增加预测答案、正确答案、是否正确、耗时和错误信息。"""
+    """用途：使用一个或多个裁判评估开放题回答并多数汇总。
+
+    输入：rows：含两个回答的题目；judges：裁判列表。
+    输出：返回逐题胜者、分数、理由、偏见和错误字段。
+    运行前数据形态：每题已有 answer_a/answer_b。
+    运行后数据变化：逐裁判收集 verdict，过滤错误后计算 final_winner。
+    副作用：会调用裁判模型并打印进度；不写文件。
+    异常或失败处理：全部裁判失败时该题记录错误。"""
 
     results: list[dict] = []
     for index, row in enumerate(rows, start=1):
@@ -76,11 +78,15 @@ def evaluate_rows(rows: list[dict], judges: list[tuple]) -> list[dict]:
 
 def run(input_path: str | Path | None = None, output_dir: str | Path | None = None,
         max_items: int | None = None) -> tuple[list[dict], Path]:
-    """完成当前模块中的一个处理步骤。
+    """用途：读取选手回答，执行双轮位置交换和多裁判投票，并写入独立运行目录。
 
-参数：input_path、output_dir、max_items。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：input_path 是含 answer_a/answer_b 的 JSONL；output_dir 指定结果目录；max_items 限制试跑题数。
+    输出：返回 (逐题汇总结果列表, 实际运行目录 Path)。
+    运行前数据形态：运行前每行只有原始选手回答和身份。
+    运行后数据变化：运行后每行增加两轮映射、多裁判胜负、最终多数结果、分数与位置偏见字段。
+    副作用：读取环境变量并调用模型完成裁判，创建目录并写 JSONL、Markdown、元数据和可选 Excel。
+    异常或失败处理：输入不存在时抛出 FileNotFoundError；单个裁判错误保留在逐题结果中，Excel 失败不影响 JSONL。
+    最小示例：一题有三个裁判时先分别完成位置交换，再过滤有效结果并投票。"""
 
     source = Path(input_path) if input_path else DATA_ROOT / "judge_answers.jsonl"
     if not source.is_file():
@@ -98,11 +104,12 @@ def run(input_path: str | Path | None = None, output_dir: str | Path | None = No
 
 
 def main() -> None:
-    """完成当前模块中的一个处理步骤。
+    """用途：解析 Pairwise 评测 CLI 参数并调用 run。
 
-参数：无。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：命令行 --input、--output-dir、--max-items。
+    输出：成功打印运行目录；失败退出 1。
+    副作用：可能调用多个裁判模型并写结果。
+    异常或失败处理：捕获异常后打印 stderr 并 SystemExit(1)。"""
 
     parser = argparse.ArgumentParser(description="运行带位置交换、多裁判和偏见统计的成对比较")
     parser.add_argument("--input", help="选手回答 JSONL")

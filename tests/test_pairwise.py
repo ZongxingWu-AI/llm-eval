@@ -1,14 +1,8 @@
-"""测试模块：tests/test_pairwise.py。
+"""Pairwise Judge 核心行为测试。
 
-本文件验证项目中的一个具体行为或模块边界。测试输入通常是内存中的最小样例，测试输出是断言结果，不调用真实模型 API。
-
-项目位置：tests/test_pairwise.py。
-主要用途：项目测试模块，验证公共基础层和三条评测线的行为、数据隔离与文档规范。
-输入：输入来自测试夹具、临时目录和项目模块。
-输出：输出为测试断言结果，不产生正式评测数据。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：通常只创建临时文件或调用测试替身，不调用真实模型 API。
-"""
+被测模块：pairwise、bias_stats。覆盖 fenced JSON、双轮位置交换映射、多数投票和位置偏见统计。
+裁判模型使用 mock，不访问真实 API，也不创建正式结果文件。
+失败表示位置标签可能被错误当成原始选手，或汇总统计发生变化。"""
 
 import unittest
 from unittest.mock import patch
@@ -20,21 +14,21 @@ from tracks.pairwise_judge.pairwise import judge_one, majority_winner, parse_jud
 
 class PairwiseTests(unittest.TestCase):
     def test_parses_fenced_json(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证裁判 fenced JSON 能解析 winner、分数和理由。
+        准备数据：准备包含 winner=A 的 Markdown JSON 响应。
+        调用函数：调用 parse_judge_json。
+        预期结果：返回对象并保留胜者字段。
+        该断言保护的行为：裁判常用代码围栏不会被误判为解析错误。"""
 
         self.assertEqual(parse_judge_json('```json\n{"winner":"A"}\n```'), {"winner": "A"})
 
     @patch("tracks.pairwise_judge.pairwise.llm_client.call_model")
     def test_position_swap_maps_second_round_back_to_original_contestants(self, call_model):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self、call_model。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证第二轮交换位置后，位置 B 能正确映射回原始选手 A。
+        准备数据：mock 两轮裁判依次返回位置 A 和位置 B。
+        调用函数：调用 judge_one。
+        预期结果：round1_winner 与 round2_winner 均为原始 A，最终胜者为 A。
+        该断言保护的行为：A/B 位置标签不会覆盖原始参赛者身份。"""
 
         call_model.side_effect = [
             ('{"winner":"A","score_a":{"x":5},"score_b":{"x":2},"analysis":"first"}', 0, 0, "stop"),
@@ -47,11 +41,11 @@ class PairwiseTests(unittest.TestCase):
 
     @patch("tracks.pairwise_judge.pairwise.llm_client.call_model")
     def test_disagreement_after_position_swap_flags_position_bias(self, call_model):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self、call_model。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证两轮都偏好位置 A 时会映射成原始双方各胜一轮。
+        准备数据：mock 两轮裁判均返回位置 A。
+        调用函数：调用 judge_one。
+        预期结果：最终 tie 且 position_bias=True。
+        该断言保护的行为：位置偏见可被双轮交换检测，而不是错误判某位选手获胜。"""
 
         call_model.side_effect = [
             ('{"winner":"A"}', 0, 0, "stop"),
@@ -62,21 +56,21 @@ class PairwiseTests(unittest.TestCase):
         self.assertTrue(result["position_bias"])
 
     def test_majority_vote(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证多个有效裁判结果按原始选手进行多数投票。
+        准备数据：准备两个 A 胜和一个 B 胜的结果。
+        调用函数：调用 majority_winner。
+        预期结果：返回 A。
+        该断言保护的行为：多裁判汇总不会受单个裁判顺序影响。"""
 
         self.assertEqual(majority_winner(["A", "A", "B"]), "A")
         self.assertEqual(majority_winner(["A", "B"]), "tie")
 
     def test_bias_statistics_preserve_expected_counts(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证位置偏见与胜负数量的统计口径。
+        准备数据：准备包含 A 胜、平局和 position_bias 标记的逐题结果。
+        调用函数：调用 compute_stats。
+        预期结果：总数、胜负和平局及偏见计数符合样例。
+        该断言保护的行为：报告使用的统计字段不会在重构中改变含义。"""
 
         rows = [{"model_a": "alpha-large", "model_b": "beta-large"}]
         results = [{

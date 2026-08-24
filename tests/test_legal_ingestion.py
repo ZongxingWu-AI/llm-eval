@@ -1,14 +1,8 @@
-"""测试模块：tests/test_legal_ingestion.py。
+"""法律判决书无损解析测试。
 
-本文件验证项目中的一个具体行为或模块边界。测试输入通常是内存中的最小样例，测试输出是断言结果，不调用真实模型 API。
-
-项目位置：tests/test_legal_ingestion.py。
-主要用途：项目测试模块，验证公共基础层和三条评测线的行为、数据隔离与文档规范。
-输入：输入来自测试夹具、临时目录和项目模块。
-输出：输出为测试断言结果，不产生正式评测数据。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：通常只创建临时文件或调用测试替身，不调用真实模型 API。
-"""
+被测模块：tracks.legal_benchmark.ingestion.clean。覆盖全文保留、主要章节、多方当事人、哈希和质量元数据。
+使用内存判决书样例，不调用模型、不写正式 raw/parsed。
+失败表示清洗可能丢失法院说理、判决主文或错误遗漏当事人。"""
 
 import unittest
 
@@ -30,11 +24,11 @@ SAMPLE = """
 
 class LegalIngestionTests(unittest.TestCase):
     def test_parsing_is_lossless_and_preserves_legal_sections(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证解析后 full_text 完整保留且诉请、说理、主文均可定位。
+        准备数据：准备包含典型章节标记的内存判决书。
+        调用函数：调用 parse_judgment。
+        预期结果：full_text 等于输入，claims、court_reasoning、judgment 非空。
+        该断言保护的行为：第一阶段清洗不能用摘要替代全文或丢失关键裁判内容。"""
 
         row = parse_judgment(SAMPLE, source_file="sample.md")
         self.assertEqual(row["document"]["case_no"], "（2024）浙0483民初5218号")
@@ -46,11 +40,11 @@ class LegalIngestionTests(unittest.TestCase):
         self.assertIn("民法典", row["cited_statutes"][0])
 
     def test_extracts_all_named_parties(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证一行多个原被告会拆成独立当事人。
+        准备数据：准备含并列原告、被告和代理人的角色行。
+        调用函数：调用 extract_parties。
+        预期结果：返回全部姓名及正确角色，而非只保留首项。
+        该断言保护的行为：多方当事人案件的主体信息完整。"""
 
         row = parse_judgment(SAMPLE, source_file="sample.md")
         names = {(party["role"], party["name"]) for party in row["parties"]}
@@ -59,11 +53,11 @@ class LegalIngestionTests(unittest.TestCase):
         self.assertIn(("被告", "任某"), names)
 
     def test_records_hash_and_quality_metadata(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证案件哈希、解析器版本和缺失章节状态被记录。
+        准备数据：准备最小判决书文本和来源文件名。
+        调用函数：调用 parse_judgment。
+        预期结果：source.sha256、quality.parser_version 和 review_status 存在。
+        该断言保护的行为：原始来源与解析质量可追踪、可重复。"""
 
         row = parse_judgment(SAMPLE, source_file="sample.md")
         self.assertEqual(len(row["source"]["sha256"]), 64)

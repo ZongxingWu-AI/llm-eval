@@ -1,4 +1,8 @@
-"""公共 JSON 解析模块：负责从模型文本中提取 JSON，不写文件。"""
+"""公共模型 JSON 解析模块。
+
+输入可能是纯 JSON、Markdown 代码围栏或夹杂解释文字的模型响应。
+输出是解析后的任意 JSON 值或字典，并通过平衡括号扫描寻找候选片段。
+本模块供裁判、法律提取和评分共用，只处理内存，不写文件、不调用模型。"""
 
 from __future__ import annotations
 
@@ -8,18 +12,25 @@ from typing import Any
 
 
 def _balanced_candidates(text: str, opening: str, closing: str) -> list[str]:
-    """为同一文件中的公开流程提供一个小而明确的辅助步骤。
+    """用途：扫描解释文本中括号平衡的 JSON 对象或数组候选。
 
-参数：text、opening、closing。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：text：模型原始文本；opening/closing：起止括号。
+    输出：按出现顺序返回候选字符串列表。
+    运行前数据形态：文本可能含说明文字、字符串内括号和多个 JSON。
+    运行后数据变化：只在字符串外更新深度，深度回到零时截取候选。
+    副作用：只处理内存，不调用模型、不写文件。
+    异常或失败处理：没有完整闭合片段时返回空列表。
+    最小示例：输入 x {"a":"}"} y 仍会返回完整对象。"""
 
     candidates: list[str] = []
     for start, char in enumerate(text):
         if char != opening:
             continue
+        # depth 是尚未闭合的括号层数。
         depth = 0
+        # 字符串内容中的括号不能影响 JSON 结构深度。
         in_string = False
+        # escaped 用来区分真正的引号和 \" 转义引号。
         escaped = False
         for index in range(start, len(text)):
             current = text[index]
@@ -44,19 +55,15 @@ def _balanced_candidates(text: str, opening: str, closing: str) -> list[str]:
 
 
 def parse_json_value(text: str) -> Any:
-    """从模型输出中提取第一个有效的 JSON 对象或数组。
+    """用途：从纯 JSON、Markdown 围栏或混杂文本提取首个有效对象或数组。
 
-    输入：text 是模型原始文本，可以是纯 JSON、Markdown JSON 围栏，
-    也可以是“解释文字 + JSON”的混合文本。
-    输出：返回 Python 字典或列表。
-    运行前数据形态：文本可能包含前后说明、多个候选片段或转义字符串。
-    运行后数据变化：先尝试整段文本，再尝试围栏和括号平衡片段，最后把有效片段反序列化。
-    副作用：不写文件、不调用模型；找不到有效 JSON 时抛出 ValueError。
-    异常或失败处理：非字符串输入或所有候选都无法解析时明确抛出 ValueError。
-    最小示例：输入“答案如下：```json
-{\"winner\": \"A\"}
-```”，输出 `{"winner": "A"}` 对应的字典。
-    """
+    输入：text：模型原始字符串。
+    输出：返回 dict 或 list。
+    运行前数据形态：输入可能有前后解释和多个候选。
+    运行后数据变化：依次尝试整段、围栏、对象片段和数组片段。
+    副作用：只处理内存，不调用模型、不写文件。
+    异常或失败处理：非字符串或无合法 JSON 时抛出 ValueError。
+    最小示例：围栏中的 {"winner":"A"} 会返回字典。"""
     if not isinstance(text, str):
         raise ValueError("model output must be a string")
 
@@ -82,7 +89,15 @@ def parse_json_value(text: str) -> Any:
 
 
 def parse_json_object(text: str) -> dict[str, Any]:
-    """解析并校验模型输出必须是 JSON 对象。它复用 parse_json_value，拒绝数组和基础类型。"""
+    """用途：要求模型文本最终解析为 JSON 对象。
+
+    输入：text：可能带围栏或解释的模型文本。
+    输出：返回 dict。
+    运行前数据形态：输入仍是未解析字符串。
+    运行后数据变化：先调用 parse_json_value，再检查返回类型。
+    副作用：只处理内存，不调用模型、不写文件。
+    异常或失败处理：无法解析或结果是数组等非对象时抛出 ValueError。
+    最小示例：输入 [1,2] 会报错。"""
     value = parse_json_value(text)
     if not isinstance(value, dict):
         raise ValueError("model output JSON must be an object")

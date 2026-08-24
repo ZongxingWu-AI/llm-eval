@@ -1,14 +1,8 @@
-"""项目模块：tracks/ceval/evaluate.py。
+"""C-Eval 客观题评测模块。
 
-本文件属于三条评测线或公共工具层的一部分，负责完成本文件名对应的处理步骤。输入来自上游函数或数据目录，输出返回给下游函数或写入对应结果目录。
-
-项目位置：tracks/ceval/evaluate.py。
-主要用途：C-Eval 客观题评测线，负责题目获取、模型作答和客观准确率统计。
-输入：输入来自本评测线的 data 目录、公共模型客户端和 Prompt。
-输出：输出写入本评测线的 results 目录，供准确率汇总和报告使用。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：fetch 可能访问数据源；evaluate 会调用模型并写评测结果。
-"""
+输入是标准 C-Eval JSONL、Prompt 模板和被测模型配置，输出逐题预测 JSONL、错误记录、报告和运行元数据。
+模块把模型文本抽取为 A/B/C/D 并与标准答案比较，最终汇总准确率。
+运行评测会调用模型并写 C-Eval 自己的 results 目录。"""
 
 import argparse
 import json
@@ -29,19 +23,30 @@ DEFAULT_MAX_TOKENS = 8192
 
 
 def build_prompt(question: dict) -> str:
-    """把 C-Eval 单道题的题干和选项拼成统一 Prompt。调用前是包含 question 与 A-D 的题目字典，调用后是要求模型只返回选项字母的文本。"""
+    """用途：把一道 C-Eval 题干和 A-D 选项渲染为客观题 Prompt。
+
+    输入：question：含 question、A、B、C、D 的字典。
+    输出：返回要求模型输出选项字母的 Prompt。
+    副作用：读取模板，不调用模型、不写结果。
+    异常或失败处理：缺字段按空字符串渲染；模板缺失时抛异常。"""
 
     template = load_template("ceval_prompt.md", PROMPT_ROOT)
-    return render(template, {key: question.get(key, "") for key in ("question", "A", "B", "C", "D")})
+    prompt_values: dict[str, str] = {}
+    for key in ("question", "A", "B", "C", "D"):
+        prompt_values[key] = question.get(key, "")
+    return render(template, prompt_values)
 
 
 def extract_answer(text: str) -> str:
-    """从 C-Eval 模型原始输出中提取规范化选项字母。
+    """用途：从模型自由文本提取 A、B、C 或 D。
 
-    输入可以是单独的 ``A``，也可以是“答案：C”或带解释的文本；输出只会是
-    ``A``、``B``、``C``、``D`` 或空字符串。函数不调用模型、不写文件，空字符串
-    会让上游把该题记录为“未提取到答案”。
-    """
+    输入：text：模型原始回答。
+    输出：返回规范化大写字母或空串。
+    运行前数据形态：回答可能是单字母、答案：C 或解释文本。
+    运行后数据变化：按明确答案表达优先的正则提取。
+    副作用：只处理内存。
+    异常或失败处理：空文本或找不到选项时返回空串。
+    最小示例：我选择 C 会得到 C。"""
 
     if not text:
         return ""
@@ -59,13 +64,14 @@ def extract_answer(text: str) -> str:
 
 
 def evaluate_rows(rows: list[dict], client, model: str, max_tokens: int = DEFAULT_MAX_TOKENS) -> list[dict]:
-    """逐题调用模型并计算 C-Eval 结果。
+    """用途：逐题调用选手模型并形成 C-Eval 明细。
 
-    调用前每条题目含 ``question``、选项和标准 ``answer``；调用后复制题目并新增
-    ``raw_response``、``model_answer``、``is_correct``、耗时、token、结束原因和错误字段。
-    例如模型回答“答案：C”会保存原文，同时把 ``model_answer`` 设为 ``C``。
-    单题调用失败只影响该题，不会中断整批评测；函数会调用模型但不直接写文件。
-    """
+    输入：rows：标准题目；client/model/max_tokens：模型配置。
+    输出：返回新增预测、正确性、耗时和错误字段的列表。
+    运行前数据形态：每行已有标准 answer，尚无模型预测。
+    运行后数据变化：复制原字段并增加 raw_response、model_answer、is_correct 等。
+    副作用：会调用模型并打印进度；不直接写文件。
+    异常或失败处理：单题异常写入该题 error，不中断后续题目。"""
 
     results: list[dict] = []
     total = len(rows)
@@ -102,11 +108,15 @@ def evaluate_rows(rows: list[dict], client, model: str, max_tokens: int = DEFAUL
 
 def run(subject: str = DEFAULT_SUBJECT, input_path: str | Path | None = None,
         output_path: str | Path | None = None, max_items: int | None = None) -> list[dict]:
-    """完成当前模块中的一个处理步骤。
+    """用途：执行一次 C-Eval 学科评测并汇总准确率。
 
-参数：subject、input_path、output_path、max_items。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：subject、可选输入/输出路径和 max_items。
+    输出：返回逐题结果列表。
+    运行前数据形态：输入 JSONL 一行一题。
+    运行后数据变化：写逐题结果，并用无 error 题目计算 accuracy。
+    副作用：读取环境变量、调用模型并覆盖结果 JSONL 与 metadata。
+    异常或失败处理：题集不存在时抛 FileNotFoundError；单题错误由 evaluate_rows 记录。
+    最小示例：max_items=2 只评测前两题。"""
 
     llm_client.load_env()
     source = Path(input_path) if input_path else DATA_ROOT / f"ceval_{subject}.jsonl"
@@ -144,11 +154,12 @@ def run(subject: str = DEFAULT_SUBJECT, input_path: str | Path | None = None,
 
 
 def main() -> None:
-    """完成当前模块中的一个处理步骤。
+    """用途：解析 C-Eval 评测 CLI 参数并调用 run。
 
-参数：无。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：命令行 --subject、--input、--output、--max-items。
+    输出：成功打印路径和准确率；失败退出 1。
+    副作用：可能调用模型并覆盖结果文件。
+    异常或失败处理：捕获异常后写 stderr 并 SystemExit(1)。"""
 
     parser = argparse.ArgumentParser(description="运行 C-Eval 单学科评测")
     parser.add_argument("--subject", default=DEFAULT_SUBJECT, help="C-Eval 学科名")

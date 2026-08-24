@@ -1,14 +1,10 @@
-"""项目模块：tracks/legal_benchmark/validation/validate.py。
+"""法律正式题集验证模块。
 
-本文件属于三条评测线或公共工具层的一部分，负责完成本文件名对应的处理步骤。输入来自上游函数或数据目录，输出返回给下游函数或写入对应结果目录。
-
-项目位置：tracks/legal_benchmark/validation/validate.py。
-主要用途：法律真实案例 Benchmark，负责判决书解析、结构化提取、出题、校验和法律评测。
-输入：输入来自法律线 data/raw、parsed、cleaned、drafts、releases 或 taxonomy/schema。
-输出：输出按生命周期写入法律线对应 data 子目录或 results 目录。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：ingestion/extraction/generation/evaluation 可能写文件；只有带模型选项时才调用模型。
-"""
+项目位置：法律真实案例评测线的 validation 阶段。
+输入：releases/legal_questions.jsonl，以及可选的 cleaned 结构化案件。
+输出：validation_report.jsonl 和 Markdown 摘要，逐题记录 valid 与 issues。
+上下游：上游是 dataset.build，下游是冻结题集后的 evaluation.run。
+副作用：覆盖验证报告；默认只做规则校验，传入 --use-llm 时才调用裁判模型。"""
 
 import argparse
 import json
@@ -40,12 +36,15 @@ CONTROLLED_FIELDS = {
 
 
 def check_row(row: dict, case: dict | None = None) -> list[str]:
-    """校验一道法律题的字段、标签、来源引用和案件级 split。
+    """用途：校验一道正式法律题的必填字段、受控标签、split 和来源引用。
 
-    输入是正式题目以及可选的结构化案件；输出是问题字符串列表，空列表表示通过。
-    校验不会修改题目，也不会调用模型。若传入案件，会额外确认每个 ``source_quote``
-    出现在它声明的章节中，从而防止题目引用无法追溯的事实。
-    """
+    输入：row 是正式题目；case 可选，是同 case_id 的结构化案件。
+    输出：返回问题字符串列表，空列表表示该题通过规则校验。
+    运行前数据形态：运行前题目可能缺字段或含无来源证据。
+    运行后数据变化：运行后题目本身不变，只生成可人工处理的问题列表。
+    副作用：读取 taxonomy；只处理内存，不写文件、不调用模型。
+    异常或失败处理：每个问题单独追加，允许一次看到全部缺陷；case 存在时 source_quote 无法定位会报错。
+    最小示例：source_section=judgment 但 quote 不在主文时返回定位错误。"""
 
     issues: list[str] = []
     for field in REQUIRED_FIELDS:
@@ -92,7 +91,14 @@ def check_row(row: dict, case: dict | None = None) -> list[str]:
 
 
 def validate(questions: list[dict], cases: list[dict] | None = None) -> list[dict]:
-    """批量校验法律题集。输入是题目列表和可选案件列表，输出每题的 passed/failed 状态及问题说明。"""
+    """用途：批量校验正式题集，并额外检查同一案件是否跨 split。
+
+    输入：questions 是正式题目列表；cases 可选，用于引用定位。
+    输出：返回每题一条验证记录，包含 question_id、case_id、valid 和 issues。
+    运行前数据形态：运行前是一组待验证问题和可选案件。
+    运行后数据变化：运行后得到逐题验证报告，不修改原题。
+    副作用：只处理内存并读取 taxonomy，不写文件、不调用模型。
+    异常或失败处理：找不到案件时仍执行字段校验；同案出现多个 split 时为相关题追加错误。"""
 
     case_by_id: dict[str, dict] = {}
     for case in cases or []:
@@ -125,11 +131,14 @@ def run(input_path: str | Path = DATA_ROOT / "releases" / "legal_questions.jsonl
         cases_path: str | Path = DATA_ROOT / "cleaned" / "structured_cases.jsonl",
         output_path: str | Path = DATA_ROOT / "manifests" / "validation_report.jsonl",
         max_items: int | None = None, use_llm: bool = False) -> list[dict]:
-    """完成当前模块中的一个处理步骤。
+    """用途：读取正式题集和可选案件，执行规则验证，并可用模型对通过项做补充复核。
 
-参数：input_path、cases_path、output_path、max_items、use_llm。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：input_path、cases_path、output_path、max_items、use_llm 控制验证范围和方式。
+    输出：返回验证记录列表；写 validation_report.jsonl 和同目录 Markdown 摘要。
+    运行前数据形态：运行前是一行一道正式题。
+    运行后数据变化：运行后每行标记 valid 与问题列表，报告汇总通过和失败数量。
+    副作用：读取 JSONL、创建目录并覆盖报告；仅 use_llm=True 时读取 JUDGE 配置并调用模型。
+    异常或失败处理：模型复核失败会记录到该题 issues；文件或配置错误按调用方异常策略处理。"""
 
     questions = read_jsonl(input_path)
     if max_items is not None and max_items > 0:
@@ -156,7 +165,17 @@ def run(input_path: str | Path = DATA_ROOT / "releases" / "legal_questions.jsonl
                 by_id[question["question_id"]]["issues"].append("模型复核输出无法解析")
                 by_id[question["question_id"]]["status"] = "fail"
     write_jsonl(output_path, findings)
-    report = ["# 法律题集校验报告", "", f"- 题目数：{len(questions)}", f"- 失败项：{sum(item['status'] == 'fail' for item in findings)}", ""]
+    failure_count = 0
+    for item in findings:
+        if item["status"] == "fail":
+            failure_count += 1
+    report = [
+        "# 法律题集校验报告",
+        "",
+        f"- 题目数：{len(questions)}",
+        f"- 失败项：{failure_count}",
+        "",
+    ]
     for item in findings:
         report.append(f"- [{item['status'].upper()}] {item['question_id'] or item['case_id']}：{'；'.join(item['issues']) or '通过'}")
     Path(output_path).with_suffix(".md").write_text("\n".join(report) + "\n", encoding="utf-8")
@@ -164,11 +183,14 @@ def run(input_path: str | Path = DATA_ROOT / "releases" / "legal_questions.jsonl
 
 
 def main() -> None:
-    """完成当前模块中的一个处理步骤。
+    """用途：提供题集验证 CLI，并用退出码区分全部通过和存在失败项。
 
-参数：无。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：参数来自 argparse；默认验证 releases/legal_questions.jsonl，可选 cleaned 案件和 --use-llm。
+    输出：写出 JSONL/Markdown 报告；全部有效时退出 0，有任一无效题时退出 1。
+    运行前数据形态：运行前是正式题集和命令行参数。
+    运行后数据变化：运行后生成发布前质量报告，阻止无来源或跨 split 题进入评测。
+    副作用：创建目录并覆盖验证报告；只有 --use-llm 时调用裁判模型。
+    异常或失败处理：参数错误由 argparse 处理；运行异常或验证失败均产生非零退出。"""
 
     parser = argparse.ArgumentParser(description="校验法律题集、受控标签、来源定位和案件级 split")
     parser.add_argument("--input", default=str(DATA_ROOT / "releases" / "legal_questions.jsonl"), help="正式题集 JSONL")
@@ -179,7 +201,10 @@ def main() -> None:
     args = parser.parse_args()
     try:
         findings = run(args.input, args.cases, args.output, args.max_items, args.llm_check)
-        failed = sum(item["status"] == "fail" for item in findings)
+        failed = 0
+        for item in findings:
+            if item["status"] == "fail":
+                failed += 1
         print(f"完成：{args.output}，失败项 {failed}")
         raise SystemExit(1 if failed else 0)
     except SystemExit:

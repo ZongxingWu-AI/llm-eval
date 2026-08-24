@@ -1,14 +1,10 @@
-"""项目模块：tools/export_excel.py。
+"""评测 JSONL 转 Excel 工具。
 
-本文件属于三条评测线或公共工具层的一部分，负责完成本文件名对应的处理步骤。输入来自上游函数或数据目录，输出返回给下游函数或写入对应结果目录。
-
-项目位置：tools/export_excel.py。
-主要用途：项目工具层，提供跨评测线的导出和辅助能力。
-输入：输入来自各评测线的 JSON/JSONL 结果文件。
-输出：输出写为用户指定的 Excel 或其他辅助文件。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：可能创建输出目录并写文件，不负责调用真实模型。
-"""
+项目位置：仓库公共 tools 层，可服务 C-Eval、Pairwise Judge 和法律线。
+输入：单个 JSONL 路径，或三条评测线 data/results 下自动发现的 JSONL。
+输出：字段作为列、记录作为行的 xlsx 工作簿。
+上下游：上游是各评测线产生的结构化结果，下游是人工阅读、筛选和报告制作。
+副作用：读取 JSONL 并覆盖目标 Excel 文件；不调用任何模型。"""
 
 import argparse
 import json
@@ -19,11 +15,14 @@ from typing import Iterable
 
 
 def _flatten(value):
-    """为同一文件中的公开流程提供一个小而明确的辅助步骤。
+    """用途：把 JSON 字段值转换为适合 Excel 单元格保存的文本或标量。
 
-参数：value。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：value 可以是字典、列表、字符串、数字、布尔值或 None。
+    输出：字典和列表返回未转义中文的 JSON 字符串；其他值原样返回。
+    运行前数据形态：运行前单元格值可能是嵌套对象。
+    运行后数据变化：运行后复杂值成为一个可读字符串，避免拆散 schema。
+    副作用：只处理内存，不写文件、不调用模型。
+    异常或失败处理：不可 JSON 序列化的嵌套值会由 json.dumps 抛出异常。"""
 
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False)
@@ -32,16 +31,15 @@ def _flatten(value):
 
 def export_jsonl(input_path: str | Path, output_path: str | Path | None = None,
                  max_items: int | None = None) -> Path:
-    """读取 JSONL 并导出为 Excel 工作簿。
+    """用途：把一行一个 JSON 对象的评测结果导出为带表头和基础样式的 Excel。
 
-    输入：input_path 指向一行一个 JSON 对象的文件，output_path 可指定 xlsx 路径，
-    max_items 用于试跑时限制读取行数。
-    输出：返回实际生成的 Excel 路径。
-    运行前数据形态：每个非空行是一个 JSON 对象，字段集合可以不完全一致。
-    运行后数据变化：所有出现过的字段成为列，嵌套对象或数组通过 _flatten 变成单元格字符串。
-    副作用：创建父目录并覆盖同名 xlsx 文件；需要 openpyxl，但不调用模型。
-    异常或失败处理：输入文件不存在、JSON 行非法或缺少依赖时抛出异常。
-    """
+    输入：input_path 是 JSONL；output_path 可选；max_items 限制导出行数。
+    输出：返回生成的 xlsx Path。
+    运行前数据形态：运行前每个非空行是字段可能不同的 JSON 对象。
+    运行后数据变化：运行后所有出现过的键成为列，嵌套值经 _flatten 写入单元格。
+    副作用：读取 JSONL，创建父目录并覆盖同名 xlsx；依赖 openpyxl，不调用模型。
+    异常或失败处理：输入不存在、某行 JSON 非法或缺少 openpyxl 时抛出明确异常。
+    最小示例：两行分别含 a 和 b 字段时，Excel 表头会同时包含 a、b。"""
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Font, PatternFill
@@ -78,7 +76,13 @@ def export_jsonl(input_path: str | Path, output_path: str | Path | None = None,
         sheet.freeze_panes = "A2"
         sheet.auto_filter.ref = sheet.dimensions
         for column_cells in sheet.columns:
-            max_length = min(60, max(len(str(cell.value or "")) for cell in column_cells) + 2)
+            longest_cell_length = 0
+            for cell in column_cells:
+                cell_text = str(cell.value or "")
+                cell_length = len(cell_text)
+                if cell_length > longest_cell_length:
+                    longest_cell_length = cell_length
+            max_length = min(60, longest_cell_length + 2)
             sheet.column_dimensions[column_cells[0].column_letter].width = max(10, max_length)
             for cell in column_cells[1:]:
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
@@ -87,7 +91,14 @@ def export_jsonl(input_path: str | Path, output_path: str | Path | None = None,
 
 
 def discover_jsonl() -> Iterable[Path]:
-    """扫描指定目录下可以导出的 JSONL 文件。调用后返回排序后的文件路径列表，不读取或修改文件内容。"""
+    """用途：扫描三条评测线 data 和 results 中可批量导出的 JSONL 文件。
+
+    输入：无参数；从 PROJECT_ROOT/tracks 下固定三个模块开始扫描。
+    输出：按评测线和目录顺序逐个产生 Path。
+    运行前数据形态：运行前各评测线文件分散在自己的 data/results。
+    运行后数据变化：运行后调用方可逐个交给 export_jsonl。
+    副作用：只读取目录结构，不读取文件内容、不写文件、不调用模型。
+    异常或失败处理：目录不存在时跳过；无 JSONL 时产生空迭代。"""
 
     for track in ("ceval", "pairwise_judge", "legal_benchmark"):
         root = PROJECT_ROOT / "tracks" / track
@@ -98,11 +109,14 @@ def discover_jsonl() -> Iterable[Path]:
 
 
 def main() -> None:
-    """完成当前模块中的一个处理步骤。
+    """用途：提供 Excel 导出 CLI，支持单文件模式和扫描三条评测线的批量模式。
 
-参数：无。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：--input、--output、--max-items 来自 argparse；不传 input 时自动扫描。
+    输出：单文件打印目标路径；批量模式打印每个映射和总数。
+    运行前数据形态：运行前是 JSONL 路径或空参数。
+    运行后数据变化：运行后在源文件旁或指定位置生成 Excel。
+    副作用：调用 export_jsonl 创建并覆盖 xlsx 文件；不调用模型。
+    异常或失败处理：只传 --output 而不传 --input 时由 argparse 报错；单文件导出异常向上抛出。"""
 
     parser = argparse.ArgumentParser(description="把评测 JSONL 导出为 Excel")
     parser.add_argument("--input", help="单个 JSONL；不传则扫描三条评测线")

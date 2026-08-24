@@ -1,4 +1,8 @@
-"""公共数据读写模块：提供 JSONL 文件的读取和写入，不调用模型。"""
+"""公共 JSONL 数据读写模块。
+
+输入是一行一个 JSON 对象的文件路径或字典列表，输出是字典列表或写入后的 Path。
+C-Eval、Pairwise Judge 和法律线都通过本模块统一读写 JSONL，避免重复实现格式细节。
+读取只访问指定文件；写入会创建父目录并覆盖目标文件，不调用模型。"""
 
 from __future__ import annotations
 
@@ -8,19 +12,15 @@ from typing import Any, Iterable
 
 
 def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
-    """读取一个 JSONL 文件，并把它变成字典列表。
+    """用途：读取一行一个 JSON 对象的 JSONL 文件。
 
-    参数：
-        path：JSONL 文件路径。文件约定为“一行一个 JSON 对象”，空行会跳过。
-    返回：
-        按文件原顺序排列的字典列表。
-    副作用：
-        只读文件，不修改文件内容。若 JSON 格式错误，``json.loads`` 会抛出异常，
-        让上游知道输入文件需要修复。
-    数据变化示例：
-        文件内容 ``{"id": "q1"}\n{"id": "q2"}``，调用后得到
-        ``[{"id": "q1"}, {"id": "q2"}]``。
-    """
+    输入：path：JSONL 文件路径，空行允许存在。
+    输出：按文件顺序返回字典列表。
+    运行前数据形态：磁盘上是多行独立 JSON 对象。
+    运行后数据变化：每个非空行经 json.loads 变成一个字典。
+    副作用：只读文件，不修改内容、不调用模型。
+    异常或失败处理：文件不存在或某行 JSON 非法时向上抛出异常。
+    最小示例：两行对象会得到两个字典组成的列表。"""
 
     rows: list[dict[str, Any]] = []
     lines = Path(path).read_text(encoding="utf-8").splitlines()
@@ -32,19 +32,15 @@ def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
 
 
 def write_jsonl(path: str | Path, rows: Iterable[dict[str, Any]]) -> None:
-    """把字典序列写成 JSONL 文件。
+    """用途：把字典序列写成一行一个对象的 JSONL。
 
-    参数：
-        path：目标 JSONL 路径。父目录不存在时会自动创建。
-        rows：字典列表或其他可迭代对象。
-    返回：
-        ``None``。数据通过文件写入落盘。
-    副作用：
-        会创建父目录并覆盖同名目标文件；不会修改传入的字典。
-    数据变化示例：
-        输入 ``[{"id": "q1"}, {"id": "q2"}]`` 会写成两行，
-        而不是写成一个外层数组 ``[...]``。
-    """
+    输入：path：目标路径；rows：字典可迭代对象。
+    输出：返回 None，数据写入目标文件。
+    运行前数据形态：内存中是字典列表或生成器。
+    运行后数据变化：每个字典序列化为一行，不添加外层数组。
+    副作用：创建父目录并覆盖同名文件；不调用模型。
+    异常或失败处理：值不可序列化或路径不可写时向上抛出异常。
+    最小示例：输入两个字典会写成两行 JSON。"""
 
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)

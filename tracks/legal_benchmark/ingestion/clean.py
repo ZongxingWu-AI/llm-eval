@@ -1,14 +1,10 @@
-"""项目模块：tracks/legal_benchmark/ingestion/clean.py。
+"""法律判决书无损解析模块。
 
-本文件属于三条评测线或公共工具层的一部分，负责完成本文件名对应的处理步骤。输入来自上游函数或数据目录，输出返回给下游函数或写入对应结果目录。
-
-项目位置：tracks/legal_benchmark/ingestion/clean.py。
-主要用途：法律真实案例 Benchmark，负责判决书解析、结构化提取、出题、校验和法律评测。
-输入：输入来自法律线 data/raw、parsed、cleaned、drafts、releases 或 taxonomy/schema。
-输出：输出按生命周期写入法律线对应 data 子目录或 results 目录。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：ingestion/extraction/generation/evaluation 可能写文件；只有带模型选项时才调用模型。
-"""
+项目位置：法律真实案例评测线的 ingestion 阶段。
+输入：tracks/legal_benchmark/data/raw/ 中一案一文件的 Markdown 或文本判决书。
+输出：parsed_judgments.jsonl 和 raw_manifest.jsonl；每案保留 full_text、章节、当事人、分类、哈希和质量状态。
+上下游：上游是人工收集的原始案例，下游是 extraction.extract 的法律信息提取。
+副作用：读取本地原始文件并覆盖指定 JSONL 输出；不调用大模型，也不修改 raw 文件。"""
 
 import argparse
 import hashlib
@@ -35,7 +31,14 @@ SECTION_MARKERS = {
 
 
 def list_raw_files(raw_dir: str | Path) -> list[Path]:
-    """列出原始判决书目录中的可处理文件。调用前是 raw 目录，调用后返回排序后的 md/txt 文件列表，并跳过 README。"""
+    """用途：枚举 raw 目录中可交给解析器处理的判决书，并保持稳定文件顺序。
+
+    输入：raw_dir 是原始案例目录路径。
+    输出：返回按文件名排序的 .md/.txt Path 列表，README 不进入列表。
+    运行前数据形态：目录可能同时包含 README、子目录和判决书。
+    运行后数据变化：结果只保留普通文件中的 Markdown 和文本判决书。
+    副作用：只读取目录项，不创建目录、不写文件、不调用模型。
+    异常或失败处理：目录不存在时返回空列表；其他文件系统错误由调用方处理。"""
 
     directory = Path(raw_dir)
     if not directory.exists():
@@ -53,24 +56,42 @@ def list_raw_files(raw_dir: str | Path) -> list[Path]:
 
 
 def sha256_text(text: str) -> str:
-    """计算原文 UTF-8 编码的 SHA-256。调用前是完整文本，调用后返回固定长度哈希，用于识别内容变化和建立来源清单。"""
+    """用途：计算判决书全文的 SHA-256，作为内容身份和变更检测依据。
+
+    输入：text 是尚未截断的判决书完整字符串。
+    输出：返回 64 位十六进制哈希字符串。
+    运行前数据形态：输入是原始全文。
+    运行后数据变化：输出哈希写入 source.sha256，并参与生成 case_id。
+    副作用：只在内存中编码和计算，不写文件、不调用模型。
+    异常或失败处理：空字符串也会得到确定哈希；非字符串会由 encode 调用抛出异常。
+    最小示例：“判决全文”会得到固定哈希；正文任一字符变化都会产生新哈希。"""
 
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def extract_case_no(text: str) -> str:
-    """从判决书全文提取案号。调用前是原始文本，调用后返回规范化的中文括号案号；找不到时返回空字符串。"""
+    """用途：从判决书全文中识别并统一案号括号样式。
+
+    输入：text 是包含标题和正文的原始判决书字符串。
+    输出：找到时返回如（2024）浙0483民初5218号；找不到返回空字符串。
+    运行前数据形态：原文案号可能使用半角或全角括号。
+    运行后数据变化：输出统一使用中文全角括号。
+    副作用：只做正则匹配，不修改全文、不写文件、不调用模型。
+    异常或失败处理：不符合当前案号模式时返回空字符串，交由 quality.missing_sections 提醒人工复核。"""
 
     match = re.search(r"[（(]\d{4}[）)][^\n，。；;]{2,40}号", text)
     return match.group(0).replace("(", "（").replace(")", "）") if match else ""
 
 
 def _extract_date(text: str) -> str:
-    """为同一文件中的公开流程提供一个小而明确的辅助步骤。
+    """用途：从全文提取最后出现的裁判日期，兼容阿拉伯数字和中文数字日期。
 
-参数：text。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：text 是完整判决书文本。
+    输出：返回最后一个匹配日期字符串；没有日期时返回空字符串。
+    运行前数据形态：全文可能包含借款日期、开庭日期和落款日期。
+    运行后数据变化：取最后出现的日期作为 document.date 候选。
+    副作用：只扫描内存文本，不写文件、不调用模型。
+    异常或失败处理：无法匹配时返回空字符串，不猜测日期。"""
 
     numeric = re.findall(r"\d{4}年\d{1,2}月\d{1,2}日", text)
     chinese = re.findall(r"[二〇零一二三四五六七八九十]{4}年[一二三四五六七八九十]{1,3}月[一二三四五六七八九十]{1,3}日", text)
@@ -78,11 +99,14 @@ def _extract_date(text: str) -> str:
 
 
 def _infer_procedure(case_no: str) -> str:
-    """为同一文件中的公开流程提供一个小而明确的辅助步骤。
+    """用途：依据案号中的“民初、民终、民再”等标记推断程序阶段。
 
-参数：case_no。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：case_no 是 extract_case_no 返回的案号字符串。
+    输出：返回一审、二审、再审、执行或未知。
+    运行前数据形态：输入示例为（2024）浙0483民初5218号。
+    运行后数据变化：输出“一审”，供 classification.procedure_stage 使用。
+    副作用：只读取字符串，不写文件、不调用模型。
+    异常或失败处理：空案号或未识别标记返回“未知”。"""
 
     for token, label in (("民初", "一审"), ("民终", "二审"), ("民再", "再审"), ("刑初", "一审"), ("行初", "一审")):
         if token in case_no:
@@ -91,11 +115,14 @@ def _infer_procedure(case_no: str) -> str:
 
 
 def _first_line_matching(text: str, pattern: str) -> str:
-    """为同一文件中的公开流程提供一个小而明确的辅助步骤。
+    """用途：查找第一行满足正则模式的非空文本，用于提取法院或文书标题。
 
-参数：text、pattern。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：text 是全文；pattern 是逐行匹配的正则表达式。
+    输出：返回首个匹配行的去空白文本；找不到返回空字符串。
+    运行前数据形态：输入是按换行组织的判决书。
+    运行后数据变化：输出从全文中选择一行，不改变原始内容。
+    副作用：只遍历内存文本，不写文件、不调用模型。
+    异常或失败处理：正则无匹配时返回空字符串；非法正则由 re 模块抛出异常。"""
 
     for line in text.splitlines():
         if re.search(pattern, line):
@@ -104,11 +131,14 @@ def _first_line_matching(text: str, pattern: str) -> str:
 
 
 def _split_party_names(value: str) -> list[str]:
-    """为同一文件中的公开流程提供一个小而明确的辅助步骤。
+    """用途：把一行中并列出现的多个当事人名称拆成独立名称。
 
-参数：value。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：value 是去掉角色标签后的姓名或机构名称文本。
+    输出：返回保持原顺序、去重后的名称列表。
+    运行前数据形态：输入可能是“张某、李某”或带顿号、逗号的名称串。
+    运行后数据变化：输出为[“张某”, “李某”]，供 extract_parties 逐人建记录。
+    副作用：只处理内存字符串，不写文件、不调用模型。
+    异常或失败处理：空值或拆分后无有效名称时返回空列表。"""
 
     value = re.sub(r"（[^）]*）|\([^)]*\)", "", value).strip(" ：:、，,；;。\t")
     if not value:
@@ -120,7 +150,12 @@ def _split_party_names(value: str) -> list[str]:
         token = re.sub(r"\s+", "", token).strip("。；;")
         if not token:
             continue
-        if any(token.startswith(prefix) for prefix in descriptors):
+        starts_with_descriptor = False
+        for prefix in descriptors:
+            if token.startswith(prefix):
+                starts_with_descriptor = True
+                break
+        if starts_with_descriptor:
             break
         if len(token) > 40:
             token = re.split(r"(?:系|住|出生|公民身份|身份证)", token, maxsplit=1)[0]
@@ -130,7 +165,15 @@ def _split_party_names(value: str) -> list[str]:
 
 
 def extract_parties(text: str) -> list[dict[str, str]]:
-    """从带角色冒号的行中提取全部当事人和代理人。调用前是全文，调用后返回去重并带 party_id 的角色-姓名列表，不把叙述句误当成当事人。"""
+    """用途：识别原告、被告、第三人及代理人等多方当事人，避免只保留首个原被告。
+
+    输入：text 是完整判决书；按 ROLE_LABELS 扫描角色行。
+    输出：返回字典列表，每项包含 role 和 name，并按原文出现顺序去重。
+    运行前数据形态：原始文本可能有“原告：甲、乙”和多个独立角色行。
+    运行后数据变化：输出会拆成多条 party 记录，后续匿名化为每人分配独立编号。
+    副作用：只读取全文，不匿名化原文、不写文件、不调用模型。
+    异常或失败处理：未识别到角色时返回空列表；叙事句不会被当成新增当事人。
+    最小示例：原告：甲、乙会生成两条 role=原告 的记录。"""
 
     parties: list[dict[str, str]] = []
     for line in text.splitlines():
@@ -154,11 +197,14 @@ def extract_parties(text: str) -> list[dict[str, str]]:
 
 
 def _marker_positions(text: str) -> list[tuple[int, str, str]]:
-    """为同一文件中的公开流程提供一个小而明确的辅助步骤。
+    """用途：定位诉讼请求、答辩、事实、法院说理和判决主文的章节标记。
 
-参数：text。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：text 是完整判决书；SECTION_MARKERS 提供受控标记词。
+    输出：返回按字符位置排序的 (位置, 章节名, 命中标记) 元组列表。
+    运行前数据形态：输入尚未切分，仍是一段完整字符串。
+    运行后数据变化：输出记录边界，不删除任何正文。
+    副作用：只扫描内存文本，不写文件、不调用模型。
+    异常或失败处理：某章节无标记时不生成位置；重复标记只保留用于后续切分的实际命中。"""
 
     positions: list[tuple[int, str, str]] = []
     for section, markers in SECTION_MARKERS.items():
@@ -173,15 +219,19 @@ def _marker_positions(text: str) -> list[tuple[int, str, str]]:
 
 
 def split_sections(text: str) -> dict[str, str]:
-    """无损切分判决书主要章节。
+    """用途：按已识别标记无损切分法律章节，并保留未归类的前置文本。
 
-    输入是完整原文，输出是包含 ``header``、诉讼请求、答辩、事实、证据、
-    法院说理、判决主文和尾部信息的字典。原文片段仍保留在对应字段中，
-    例如“本院认为”之后的内容进入 ``court_reasoning``，不会只保留摘要。
-    不调用模型，也不写文件；章节缺失时保留空字符串，交给质量状态提示人工审核。
-    """
+    输入：text 是完整判决书全文。
+    输出：返回 sections 字典，可能包含 claims、defenses、facts、court_reasoning、judgment 和 header。
+    运行前数据形态：运行前只有一段全文。
+    运行后数据变化：运行后新增可定位章节，但各章节文本仍来自原文连续片段。
+    副作用：只在内存中切片，不写文件、不调用模型；full_text 由调用方原样保留。
+    异常或失败处理：没有章节标记时返回以 header 保存全文的字典；缺失章节由 parse_judgment 记录质量状态。
+    最小示例：“本院认为”到“判决如下”之间会成为 court_reasoning。"""
 
-    sections = {key: "" for key in ("header", "claims", "defenses", "facts", "evidence", "court_reasoning", "judgment", "tail")}
+    sections: dict[str, str] = {}
+    for key in ("header", "claims", "defenses", "facts", "evidence", "court_reasoning", "judgment", "tail"):
+        sections[key] = ""
     positions = _marker_positions(text)
     if not positions:
         sections["header"] = text
@@ -208,7 +258,14 @@ def split_sections(text: str) -> dict[str, str]:
 
 
 def extract_statutes(text: str) -> list[str]:
-    """提取全文中出现的法律条文表达。调用前是完整文本，调用后返回去重后的法条列表。"""
+    """用途：提取全文中出现的法律法规名称和条文表达。
+
+    输入：text 是完整判决书文本。
+    输出：返回按首次出现顺序去重的法条字符串列表。
+    运行前数据形态：全文仍包含原始引用句。
+    运行后数据变化：输出仅增加 cited_statutes 派生字段，不从 full_text 删除引用。
+    副作用：只执行正则扫描，不写文件、不调用模型。
+    异常或失败处理：无匹配时返回空列表，不补造法条。"""
 
     values = re.findall(r"《[^》]{2,100}》[^。；\n]{0,120}", text)
     unique_values: list[str] = []
@@ -220,7 +277,14 @@ def extract_statutes(text: str) -> list[str]:
 
 
 def extract_amounts(text: str) -> list[str]:
-    """提取金额及货币表达。调用前是完整文本，调用后返回金额字符串列表，供后续人工审核和题目生成参考。"""
+    """用途：提取人民币金额表达，供案件检索、出题和质量复核。
+
+    输入：text 是完整判决书文本。
+    输出：返回按出现顺序去重的金额字符串列表。
+    运行前数据形态：输入包含事实、请求和主文中的金额。
+    运行后数据变化：输出 amounts 列表，同时原金额仍保留在对应章节。
+    副作用：只执行正则扫描，不写文件、不调用模型。
+    异常或失败处理：无金额时返回空列表；不负责把中文金额换算为数字。"""
 
     matches = re.findall(r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*元", text)
     unique_values: list[str] = []
@@ -231,7 +295,14 @@ def extract_amounts(text: str) -> list[str]:
 
 
 def extract_dates(text: str) -> list[str]:
-    """提取中文和数字日期表达。调用前是完整文本，调用后返回日期字符串列表。"""
+    """用途：提取全文中的阿拉伯数字和中文数字日期表达。
+
+    输入：text 是完整判决书文本。
+    输出：返回按出现顺序去重的日期字符串列表。
+    运行前数据形态：输入可能含合同、履行、立案和裁判日期。
+    运行后数据变化：输出 dates 列表用于后续问题生成与复核。
+    副作用：只执行正则扫描，不写文件、不调用模型。
+    异常或失败处理：无日期时返回空列表，不推断缺失年月日。"""
 
     values = re.findall(r"\d{4}年\d{1,2}月\d{1,2}日", text)
     values += re.findall(r"[二〇零一二三四五六七八九十]{4}年[一二三四五六七八九十]{1,3}月[一二三四五六七八九十]{1,3}日", text)
@@ -243,7 +314,14 @@ def extract_dates(text: str) -> list[str]:
 
 
 def extract_interest_expressions(text: str) -> list[str]:
-    """提取包含利息、利率、LPR 或迟延履行利息的句子。调用前是完整文本，调用后返回相关表达列表。"""
+    """用途：提取包含利息、利率、逾期或资金占用费的原文句子。
+
+    输入：text 是完整判决书文本。
+    输出：返回去重后的相关句子列表。
+    运行前数据形态：输入是完整判决书。
+    运行后数据变化：输出 interest_expressions 保存可回溯的原文表达。
+    副作用：只做规则匹配，不写文件、不调用模型。
+    异常或失败处理：没有利息相关句子时返回空列表。"""
 
     patterns = [r"[^。；\n]{0,50}(?:利息|利率|LPR|贷款市场报价利率)[^。；\n]{0,100}"]
     values: list[str] = []
@@ -256,11 +334,14 @@ def extract_interest_expressions(text: str) -> list[str]:
 
 
 def infer_category(text: str) -> str:
-    """完成当前模块中的一个处理步骤。
+    """用途：根据案由和正文关键词推断首版五类民事主分类。
 
-参数：text。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：text 是完整判决书文本。
+    输出：返回合同、劳动、侵权、婚姻继承、物权之一；无明显命中时回退合同类。
+    运行前数据形态：输入尚无 primary_category。
+    运行后数据变化：输出写入 classification.primary_category，原文不变。
+    副作用：只读取文本和固定关键词，不写文件、不调用模型。
+    异常或失败处理：多个类别同时命中时按代码中的明确优先级返回；无命中使用保守默认值。"""
 
     rules = (("劳动争议", ("劳动关系", "劳动合同", "工资", "工伤", "经济补偿")),
              ("婚姻家庭、继承纠纷", ("离婚", "抚养", "继承", "夫妻共同债务", "婚姻")),
@@ -275,11 +356,14 @@ def infer_category(text: str) -> str:
 
 
 def infer_cause_path(text: str, category: str) -> list[str]:
-    """完成当前模块中的一个处理步骤。
+    """用途：调用受控 taxonomy 推断主分类下的层级案由路径。
 
-参数：text、category。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：text 是判决书全文；category 是 infer_category 得到的主分类。
+    输出：返回从主分类到具体案由的字符串列表。
+    运行前数据形态：输入包含主分类和原文关键词。
+    运行后数据变化：输出写入 classification.cause_path，并可由 validate_cause_path 校验。
+    副作用：会读取 taxonomy.json 的缓存内容；不写文件、不调用模型。
+    异常或失败处理：无法匹配具体子案由时返回该分类的受控默认路径。"""
 
     leaves = {
         "合同、准合同纠纷": (("买卖", "买卖合同纠纷"), ("借款", "民间借贷纠纷"), ("租赁", "租赁合同纠纷"), ("服务", "服务合同纠纷"), ("劳务", "劳务合同纠纷")),
@@ -306,15 +390,14 @@ def infer_cause_path(text: str, category: str) -> list[str]:
 
 
 def _party_name_length(party: dict) -> int:
-    """返回当事人名称长度，供匿名化排序使用。
+    """用途：提供按当事人名称长度降序匿名化的排序值。
 
-    输入：一个包含 ``name`` 字段的当事人字典。
-    输出：名称的字符数；名称缺失或类型不正确时返回 0。
-    运行前数据形态：当事人列表尚未排序。
-    运行后数据变化：不修改字典，只提供稳定的排序键。
-    副作用：不写文件、不调用模型。
-    异常或失败处理：名称不是字符串时按空名称处理。
-    """
+    输入：party 是至少可能包含 name 字段的字典。
+    输出：返回名称字符串长度；缺失 name 时返回 0。
+    运行前数据形态：多个名称可能互相包含。
+    运行后数据变化：较长名称先替换，防止短名称破坏长名称匹配。
+    副作用：只读字典，不写文件、不调用模型。
+    异常或失败处理：name 不是字符串时先转为字符串，避免排序失败。"""
     name = party.get("name", "")
     if not isinstance(name, str):
         return 0
@@ -322,11 +405,15 @@ def _party_name_length(party: dict) -> int:
 
 
 def anonymize_text(text: str, parties: Iterable[dict[str, str]]) -> str:
-    """完成当前模块中的一个处理步骤。
+    """用途：根据当事人列表生成脱敏副本，原始 full_text 始终保留。
 
-参数：text、parties。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：text 是原文；parties 是包含 role/name 的可迭代对象。
+    输出：返回把非空姓名替换为“角色编号”的 anonymized_text 字符串。
+    运行前数据形态：运行前文本含真实当事人名称。
+    运行后数据变化：运行后返回脱敏文本；调用方仍把原文完整存入 full_text。
+    副作用：只在内存中生成新字符串，不修改 raw 文件、不写文件、不调用模型。
+    异常或失败处理：空姓名被跳过；同名按稳定编号替换，其他正文保持不变。
+    最小示例：两个被告会依次替换为“被告1”“被告2”。"""
 
     result = text
     sorted_parties = sorted(parties, key=_party_name_length, reverse=True)
@@ -337,13 +424,15 @@ def anonymize_text(text: str, parties: Iterable[dict[str, str]]) -> str:
 
 
 def parse_judgment(text: str, source_file: str = "") -> dict:
-    """把一份原始判决书转换为无损结构化案件。
+    """用途：把一份原始判决书组装成无损、可追溯的案件结构。
 
-    调用前输入仍是原始全文；调用后会新增 ``case_id``、来源哈希、文书信息、
-    多方当事人、章节、金额、日期、法条、分类和质量状态。
-    ``full_text`` 与 ``sections`` 同时保留，``facts_summary`` 只是派生字段，
-    不能替代全文。此函数只做确定性解析，不调用模型，但会计算哈希和当前处理时间。
-    """
+    输入：text 是未截断全文；source_file 是本地文件名。
+    输出：返回含 case_id、source、document、parties、full_text、anonymized_text、sections、抽取字段、classification 和 quality 的字典。
+    运行前数据形态：运行前是一段原始文本。
+    运行后数据变化：运行后 full_text 原样保留，同时新增章节、多方当事人、哈希、分类和质量元数据。
+    副作用：仅处理内存和读取 taxonomy；不写文件、不调用模型、不修改原始文本。
+    异常或失败处理：缺失案号或关键章节不会丢弃案件，而是在 quality.missing_sections 和 status 中记录。
+    最小示例：输入浙江买卖合同判决书后，court_reasoning 与 judgment 可分别通过 sections 定位。"""
 
     case_no = extract_case_no(text)
     digest = sha256_text(text)
@@ -410,12 +499,15 @@ def parse_judgment(text: str, source_file: str = "") -> dict:
 
 def clean_directory(raw_dir: str | Path = DATA_ROOT / "raw", output_path: str | Path = DATA_ROOT / "parsed" / "parsed_judgments.jsonl",
                     max_items: int | None = None, manifest_output: str | Path | None = None) -> list[dict]:
-    """批量解析 raw 目录并写出 parsed JSONL 与来源 manifest。
+    """用途：批量读取 raw 判决书，调用 parse_judgment，并写出解析结果与本地来源清单。
 
-    调用前输入是一个包含 ``.md`` 或 ``.txt`` 原始判决书的目录；调用后返回
-    案件字典列表，并把完整解析结果和每案哈希分别写入输出路径。每次运行都会
-    根据当前文件内容重新计算哈希和 ``case_id``，所以同名文件内容变化时不会被错误跳过。
-    """
+    输入：raw_dir 是原始目录；output_path 是 parsed JSONL；max_items 限制试跑数量；manifest_output 指定清单路径。
+    输出：返回解析案件列表；同时生成一案一行的 parsed JSONL 和 raw_manifest.jsonl。
+    运行前数据形态：运行前 raw 下是一案一文件。
+    运行后数据变化：运行后每案成为结构化 JSON 行，manifest 记录 case_id、文件名、哈希和审核状态。
+    副作用：读取原始文件，创建父目录并覆盖两个 JSONL 输出；不调用模型、不修改 raw 文件。
+    异常或失败处理：目录不存在时写出空 JSONL；单个文件解码或写入失败会抛出异常，交给 CLI 报错。
+    最小示例：同名文件正文变化后哈希和 case_id 会变化，因此会被重新处理。"""
 
     files = list_raw_files(raw_dir)
     if max_items is not None and max_items > 0:
@@ -448,11 +540,14 @@ def clean_directory(raw_dir: str | Path = DATA_ROOT / "raw", output_path: str | 
 
 
 def main() -> None:
-    """完成当前模块中的一个处理步骤。
+    """用途：提供法律清洗命令行入口，把 --raw-dir、--output、--manifest-output 和 --max-items 传给 clean_directory。
 
-参数：无。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：参数来自 argparse；默认读取法律线 raw 并写入 parsed 与 manifests。
+    输出：成功时打印处理数量并正常退出；业务结果保存在指定 JSONL 文件。
+    运行前数据形态：运行前命令行只有路径和数量参数。
+    运行后数据变化：运行后生成 parsed 案件文件和来源 manifest。
+    副作用：读取本地判决书，创建目录并覆盖输出文件；不调用模型、不修改 raw。
+    异常或失败处理：参数解析错误由 argparse 退出；文件处理异常向上抛出并产生非零退出码。"""
 
     parser = argparse.ArgumentParser(description="无损解析本地民事判决书")
     parser.add_argument("--raw-dir", "--input", default=str(DATA_ROOT / "raw"), help="原始判决书目录")

@@ -1,14 +1,8 @@
-"""测试模块：tests/test_legal_validation.py。
+"""法律正式题集验证测试。
 
-本文件验证项目中的一个具体行为或模块边界。测试输入通常是内存中的最小样例，测试输出是断言结果，不调用真实模型 API。
-
-项目位置：tests/test_legal_validation.py。
-主要用途：项目测试模块，验证公共基础层和三条评测线的行为、数据隔离与文档规范。
-输入：输入来自测试夹具、临时目录和项目模块。
-输出：输出为测试断言结果，不产生正式评测数据。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：通常只创建临时文件或调用测试替身，不调用真实模型 API。
-"""
+被测模块：validation.check_row 和 validate。覆盖 source quote 章节定位及同案问题不得跨 split。
+使用内存题目和案件，不写报告、不调用模型。
+失败表示不可追溯引用或数据泄漏可能未被发布前检查发现。"""
 
 import unittest
 
@@ -17,11 +11,12 @@ from tracks.legal_benchmark.validation.validate import check_row, validate
 class LegalValidationTests(unittest.TestCase):
 
     def setUp(self):
-        """为当前测试准备独立的临时目录、样例数据或 mock 环境。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：测试运行环境隔离。
+准备数据：创建本测试类需要的临时目录、样例输入和 mock 对象。
+调用函数：调用 unittest 的 setUp 初始化逻辑。
+预期结果：每个测试从独立环境开始。
+该断言保护的行为：保护测试之间不共享临时文件，也不污染正式结果目录。
+副作用：只使用 mock、AST 或临时数据，不调用真实模型，不写入正式数据目录。"""
 
         self.row = {
             "question_id": "q1", "case_id": "case_1", "split": "dev",
@@ -41,22 +36,22 @@ class LegalValidationTests(unittest.TestCase):
         self.case = {"case_id": "case_1", "sections": {"judgment": "判决如下：卢某支付货款。"}}
 
     def test_source_quote_must_exist_in_named_section(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证证据短引必须出现在声明的案件章节中。
+        准备数据：准备一题引用不存在文本和一个含 sections 的案件。
+        调用函数：调用 check_row。
+        预期结果：issues 包含 source_quote 无法定位。
+        该断言保护的行为：模型编造或章节标错的证据不能通过正式校验。"""
 
         self.assertEqual(check_row(self.row, self.case), [])
         bad = {**self.row, "source_evidence": [{"source_section": "judgment", "source_quote": "任某支付货款"}]}
         self.assertTrue(any("无法" in issue for issue in check_row(bad, self.case)))
 
     def test_same_case_cannot_cross_splits(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证同一 case_id 出现在多个 split 时整组报告错误。
+        准备数据：准备同案两题分别标为 dev 和 test。
+        调用函数：调用 validate。
+        预期结果：相关验证记录均为无效并包含跨 split 问题。
+        该断言保护的行为：同案事实不会泄漏到最终测试集。"""
 
         second = {**self.row, "question_id": "q2", "question": "第二题", "split": "test"}
         findings = validate([self.row, second], [self.case])

@@ -1,24 +1,19 @@
-"""项目模块：tracks/pairwise_judge/judge_prompt.py。
+"""Pairwise 裁判 Prompt 组装模块。
 
-本文件属于三条评测线或公共工具层的一部分，负责完成本文件名对应的处理步骤。输入来自上游函数或数据目录，输出返回给下游函数或写入对应结果目录。
-
-项目位置：tracks/pairwise_judge/judge_prompt.py。
-主要用途：开放题 LLM-as-Judge 评测线，负责生成回答、位置交换裁判、多裁判统计和报告。
-输入：输入来自本评测线的 data 目录、裁判 Prompt 和公共模型客户端。
-输出：输出写入本评测线的 results 目录，供偏见分析和报告阅读。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：生成和裁判模块会调用模型；统计和报告模块只处理内存数据或写结果文件。
-"""
+输入是一道开放题及两个候选回答，输出按裁判模板渲染的 Prompt。
+第二轮由调用方交换回答位置，本模块不判断胜负。
+只读取 prompts 模板并处理字符串，不写文件、不调用模型。"""
 
 from core import prompt_loader
 
 
 def build_judge_prompt(question: str, answer_a: str, answer_b: str) -> str:
-    """把题目和两份回答填入裁判 Prompt 模板。
+    """用途：把问题和当前位置 A/B 回答填入裁判 Prompt。
 
-    输入是题干、回答 A 和回答 B；输出是可直接发送给裁判模型的完整文本。
-    函数只读取 Prompt 文件，不调用模型、不写结果文件。
-    """
+    输入：question、answer_a、answer_b。
+    输出：返回完整裁判 Prompt。
+    副作用：读取模板，不调用模型、不写文件。
+    异常或失败处理：模板不存在时向上抛出异常。"""
 
     template_dir = prompt_loader.PROJECT_ROOT / "tracks" / "pairwise_judge" / "prompts"
     template = prompt_loader.load_template("judge_prompt.md", template_dir)

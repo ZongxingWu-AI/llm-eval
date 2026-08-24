@@ -1,14 +1,8 @@
-"""测试模块：tests/test_legal_dataset_build.py。
+"""法律正式题集组装测试。
 
-本文件验证项目中的一个具体行为或模块边界。测试输入通常是内存中的最小样例，测试输出是断言结果，不调用真实模型 API。
-
-项目位置：tests/test_legal_dataset_build.py。
-主要用途：项目测试模块，验证公共基础层和三条评测线的行为、数据隔离与文档规范。
-输入：输入来自测试夹具、临时目录和项目模块。
-输出：输出为测试断言结果，不产生正式评测数据。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：通常只创建临时文件或调用测试替身，不调用真实模型 API。
-"""
+被测模块：dataset.build 和案件级 split。使用内存候选题验证同案不跨集合及非法 taxonomy 的拒绝原因。
+不使用 mock、不写文件、不调用模型。
+失败表示待审题可能错误进入 release，或分类和 split 约束被破坏。"""
 
 import unittest
 
@@ -18,11 +12,12 @@ from tracks.legal_benchmark.dataset.build import build
 class DatasetBuildTests(unittest.TestCase):
 
     def _draft(self, case_id, question, risk_level="low"):
-        """为同一文件中的公开流程提供一个小而明确的辅助步骤。
-
-参数：self、case_id、question、risk_level。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：候选题测试夹具。
+准备数据：创建一条最小合法候选题并允许调用方覆盖字段。
+调用函数：调用本文件的 _draft 辅助函数。
+预期结果：返回可用于 build 校验的独立字典。
+该断言保护的行为：保护测试数据符合当前法律题目 schema。
+副作用：只使用 mock、AST 或临时数据，不调用真实模型，不写入正式数据目录。"""
 
         return {
             "case_id": case_id,
@@ -42,11 +37,11 @@ class DatasetBuildTests(unittest.TestCase):
         }
 
     def test_build_keeps_all_questions_from_one_case_in_one_split(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证同一 case_id 的多道题始终进入同一 split。
+        准备数据：准备多个案件且一个案件含多题的 approved 候选题。
+        调用函数：调用 build。
+        预期结果：同案题的 split 集合长度为 1。
+        该断言保护的行为：案件事实不能通过同案题跨 dev/test 造成泄漏。"""
 
         drafts = [self._draft("case_1", "问题一"), self._draft("case_1", "问题二"), self._draft("case_2", "问题三")]
         accepted, rejected = build(drafts)
@@ -55,22 +50,22 @@ class DatasetBuildTests(unittest.TestCase):
         self.assertEqual(len({row["question_id"] for row in accepted}), 3)
 
     def test_build_rejects_uncontrolled_risk_label(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证未知 risk_level 不会进入正式题集。
+        准备数据：把一条候选题风险标签改为 taxonomy 外值。
+        调用函数：调用 build。
+        预期结果：accepted 为空且 rejected 含 taxonomy 相关原因。
+        该断言保护的行为：模型自由标签不能绕过受控词表。"""
 
         accepted, rejected = build([self._draft("case_1", "问题", risk_level="critical")])
         self.assertEqual(accepted, [])
         self.assertEqual(len(rejected), 1)
 
     def test_build_rejects_uncontrolled_case_taxonomy(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证非法案件主分类或案由路径会被拒绝。
+        准备数据：构造 case_classification 含不受控标签的 approved 题。
+        调用函数：调用 build。
+        预期结果：题目进入 rejected 而不是 release。
+        该断言保护的行为：案件级分类与问题级标签执行同等严格校验。"""
 
         draft = self._draft("case_1", "问题")
         draft["case_classification"]["cause_path"] = ["合同、准合同纠纷", "虚构案由"]

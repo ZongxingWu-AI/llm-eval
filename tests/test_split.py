@@ -1,14 +1,8 @@
-"""测试模块：tests/test_split.py。
+"""法律案件级数据划分测试。
 
-本文件验证项目中的一个具体行为或模块边界。测试输入通常是内存中的最小样例，测试输出是断言结果，不调用真实模型 API。
-
-项目位置：tests/test_split.py。
-主要用途：项目测试模块，验证公共基础层和三条评测线的行为、数据隔离与文档规范。
-输入：输入来自测试夹具、临时目录和项目模块。
-输出：输出为测试断言结果，不产生正式评测数据。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：通常只创建临时文件或调用测试替身，不调用真实模型 API。
-"""
+被测模块：dataset.split.assign_case_splits。覆盖固定 seed 的分层比例、同案聚合和已有案件多题一致性。
+全部使用内存字典，不写文件、不调用模型。
+失败表示 dev/calibration/test 不可重复或发生同案泄漏。"""
 
 import unittest
 
@@ -18,11 +12,11 @@ from tracks.legal_benchmark.dataset.split import assign_case_splits
 class SplitTests(unittest.TestCase):
 
     def test_assigns_case_level_stratified_splits_deterministically(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证每类十案按 3/2/5 分配且固定 seed 可重复。
+        准备数据：构造五个主分类、每类十个不同 case_id。
+        调用函数：两次调用 assign_case_splits。
+        预期结果：两次结果一致，每类 dev=3、calibration=2、test=5。
+        该断言保护的行为：正式报告的固定测试集不会随重复构建漂移。"""
 
         cases = [
             {"case_id": f"contract_{i:02d}", "classification": {"primary_category": "合同、准合同纠纷"}}
@@ -51,11 +45,11 @@ class SplitTests(unittest.TestCase):
             self.assertEqual(counts, {"dev": 3, "calibration": 2, "test": 5})
 
     def test_keeps_existing_case_split_for_all_questions(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证一个案件生成多题时所有题共享案件级 split。
+        准备数据：构造同一 case_id 的多条问题记录。
+        调用函数：调用 assign_case_splits。
+        预期结果：这些题目的 split 集合只有一个值。
+        该断言保护的行为：问题数量不会让同案跨集合泄漏。"""
 
         rows = [
             {"case_id": "case_1", "question_id": "q1"},

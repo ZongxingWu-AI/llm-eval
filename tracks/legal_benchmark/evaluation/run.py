@@ -1,14 +1,10 @@
-"""项目模块：tracks/legal_benchmark/evaluation/run.py。
+"""法律真实案例评测执行模块。
 
-本文件属于三条评测线或公共工具层的一部分，负责完成本文件名对应的处理步骤。输入来自上游函数或数据目录，输出返回给下游函数或写入对应结果目录。
-
-项目位置：tracks/legal_benchmark/evaluation/run.py。
-主要用途：法律真实案例 Benchmark，负责判决书解析、结构化提取、出题、校验和法律评测。
-输入：输入来自法律线 data/raw、parsed、cleaned、drafts、releases 或 taxonomy/schema。
-输出：输出按生命周期写入法律线对应 data 子目录或 results 目录。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：ingestion/extraction/generation/evaluation 可能写文件；只有带模型选项时才调用模型。
-"""
+项目位置：法律 Benchmark 的 evaluation 阶段。
+输入：通过验证的 releases/legal_questions.jsonl 和环境变量中的被测/裁判模型配置。
+输出：法律线 results 下独立运行目录，包含逐题 JSONL、错误、Markdown 报告、元数据和可选 Excel。
+上下游：上游是冻结并验证后的题集，下游是失败分析、模型比较和项目报告。
+副作用：调用被测模型，rubric_judge 题还调用裁判模型；只写法律线结果目录。"""
 
 import argparse
 import json
@@ -33,13 +29,15 @@ def evaluate_questions(
     judge_client: Any = None,
     judge_model: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """逐题调用被测模型并完成法律题评分。
+    """用途：逐题调用模型取得被测回答，并按每题 scoring_method 生成法律评分。
 
-    调用前输入是正式题集和已经配置好的被测模型客户端；调用后每道成功题会
-    形成一条结果，包含模型回答、评分 verdict、评分详情、延迟、token 数和结束原因。
-    单题异常进入 ``errors`` 列表，不会中断其他题目。函数会调用模型，但不在这里写文件，
-    由 ``run`` 负责把结果写入法律线自己的 results 目录。
-    """
+    输入：questions 是正式题目；contestant_client/model 是被测配置；judge_client/model 供 rubric_judge 使用。
+    输出：返回 (成功结果列表, 错误列表)，结果含回答、verdict、评分详情、延迟和 token。
+    运行前数据形态：运行前每行是尚无模型回答的正式题。
+    运行后数据变化：运行后成功项增加 model_answer 与 scoring_details，失败项保留 question_id、case_id 和错误。
+    副作用：每题调用模型生成回答；rubric_judge 还调用裁判模型；本函数不写文件。
+    异常或失败处理：单题异常写入 errors 后继续下一题，避免整批中断。
+    最小示例：第二题失败不会删除第一题结果，也不会阻止第三题继续。"""
     results: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     for index, question in enumerate(questions, start=1):
@@ -78,11 +76,14 @@ def evaluate_questions(
 
 
 def _counts_by(results: list[dict[str, Any]], field: str) -> dict[str, Counter]:
-    """为同一文件中的公开流程提供一个小而明确的辅助步骤。
+    """用途：按指定字段分组统计 PASS、REVIEW、REJECT 等 verdict 数量。
 
-参数：results、field。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：results 是逐题结果列表；field 通常为 split 或 task_type。
+    输出：返回键到 Counter 的字典。
+    运行前数据形态：运行前是一组逐题结果。
+    运行后数据变化：运行后得到报告表格所需的分组计数。
+    副作用：只处理内存，不写文件、不调用模型。
+    异常或失败处理：字段为空时归入“未标注”；空结果返回空字典。"""
 
     grouped: dict[str, Counter] = defaultdict(Counter)
     for row in results:
@@ -91,8 +92,18 @@ def _counts_by(results: list[dict[str, Any]], field: str) -> dict[str, Counter]:
 
 
 def build_report(results: list[dict[str, Any]]) -> str:
-    """把法律评测逐题结果汇总为 Markdown 报告。输入是带 split、任务类型和 verdict 的结果列表，输出是按总数和分组统计组织的报告文本。"""
-    total_counts = Counter(row.get("verdict", "ERROR") for row in results)
+    """用途：把法律逐题结果汇总成便于阅读的 Markdown 报告。
+
+    输入：results 是 evaluate_questions 的成功结果列表。
+    输出：返回包含总数、总体 verdict、按 split 和 task_type 分组统计的 Markdown 字符串。
+    运行前数据形态：运行前是结构化 JSON 结果。
+    运行后数据变化：运行后变成可写入 legal_report.md 的文本。
+    副作用：只处理内存，不写文件、不调用模型。
+    异常或失败处理：空结果仍返回合法报告并显示零数量。"""
+    total_counts: Counter[str] = Counter()
+    for row in results:
+        verdict = row.get("verdict", "ERROR")
+        total_counts[verdict] += 1
     lines = [
         "# 法律真实案例 Benchmark 评测报告", "",
         f"- 题量：{len(results)}",
@@ -121,12 +132,14 @@ def build_report(results: list[dict[str, Any]]) -> str:
 
 
 def _build_clients(questions: list[dict[str, Any]]) -> tuple[Any, str, Any, str | None]:
-    """根据题集中的评分方式创建被测模型和可选裁判客户端。
+    """用途：根据题目评分方式创建被测模型客户端，并在需要时创建裁判客户端。
 
-    只要题集中出现一题 ``rubric_judge``，就读取 ``JUDGE`` 配置；否则不创建
-    裁判客户端。返回值依次是被测客户端、被测模型名、裁判客户端和裁判模型名。
-    这个函数会读取环境变量并创建 API 客户端，但不发起实际模型请求。
-    """
+    输入：questions 是正式题目列表，用于判断是否存在 rubric_judge。
+    输出：返回 contestant_client、contestant_model、judge_client、judge_model 四元组。
+    运行前数据形态：运行前只有题集和环境配置。
+    运行后数据变化：运行后得到 evaluate_questions 可直接使用的客户端与模型名。
+    副作用：读取 .env 和角色环境变量并创建客户端；不发起实际模型请求、不写文件。
+    异常或失败处理：必需角色配置缺失时由 core.llm_client 抛出明确错误；无需裁判时后两项为空。"""
 
     llm_client.load_env()
     base, key, contestant_model = llm_client.read_role("CONTESTANT_A", "deepseek-v4-flash")
@@ -151,13 +164,14 @@ def run(
     output_dir: str | Path | None = None,
     max_items: int | None = None,
 ) -> tuple[list[dict[str, Any]], Path]:
-    """运行一次完整的法律 Benchmark，并隔离写入法律线结果目录。
+    """用途：执行一次完整法律 Benchmark，并把所有产物隔离写入法律线运行目录。
 
-    输入是正式题集路径、可选输出目录和试跑数量；输出返回“逐题结果列表 + 本次
-    运行目录”。运行目录包含 ``legal_results.jsonl``、``errors.jsonl``、Markdown 报告、
-    ``run_metadata.json``，以及可用时的 Excel。函数会调用模型、写文件和记录运行元数据，
-    但不会修改 C-Eval 或 Pairwise Judge 的结果目录。
-    """
+    输入：input_path 是正式题集；output_dir 可指定运行目录；max_items 用于小规模试跑。
+    输出：返回 (逐题成功结果, 实际运行目录 Path)。
+    运行前数据形态：运行前是一行一道冻结题目。
+    运行后数据变化：运行后每次评测拥有独立结果目录，不污染 C-Eval 或 Pairwise Judge。
+    副作用：调用被测模型和可能的裁判模型；创建目录并写 legal_results.jsonl、errors.jsonl、legal_report.md、run_metadata.json 和可选 xlsx。
+    异常或失败处理：题集不存在时抛出 FileNotFoundError；Excel 导出失败只写 excel_error.txt，不影响 JSON 结果。"""
     source = Path(input_path)
     if not source.is_file():
         raise FileNotFoundError(f"找不到法律题集：{source}")
@@ -193,11 +207,14 @@ def run(
 
 
 def main() -> None:
-    """完成当前模块中的一个处理步骤。
+    """用途：提供法律评测 CLI，把题集路径、输出目录和最大题数传给 run。
 
-参数：无。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+    输入：参数来自 argparse，默认读取 releases/legal_questions.jsonl 并创建时间戳结果目录。
+    输出：成功时打印结果目录；失败打印错误并以状态码 1 退出。
+    运行前数据形态：运行前是冻结题集与命令行参数。
+    运行后数据变化：运行后生成完整逐题结果、错误、报告和元数据。
+    副作用：会调用被测模型及必要裁判模型，并写入法律线 results。
+    异常或失败处理：参数错误由 argparse 处理；run 异常转换为非零退出。"""
 
     parser = argparse.ArgumentParser(description="运行法律真实案例 Benchmark 评测")
     parser.add_argument("--input", default=str(DATA_ROOT / "releases" / "legal_questions.jsonl"), help="正式题集 JSONL")

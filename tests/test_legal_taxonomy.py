@@ -1,14 +1,8 @@
-"""测试模块：tests/test_legal_taxonomy.py。
+"""法律案由 taxonomy 测试。
 
-本文件验证项目中的一个具体行为或模块边界。测试输入通常是内存中的最小样例，测试输出是断言结果，不调用真实模型 API。
-
-项目位置：tests/test_legal_taxonomy.py。
-主要用途：项目测试模块，验证公共基础层和三条评测线的行为、数据隔离与文档规范。
-输入：输入来自测试夹具、临时目录和项目模块。
-输出：输出为测试断言结果，不产生正式评测数据。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：通常只创建临时文件或调用测试替身，不调用真实模型 API。
-"""
+被测模块：taxonomy.infer_cause_path 与 validate_cause_path。使用内存文本检查无关键词时的默认叶子仍在受控树中。
+不使用 mock、不写文件、不调用模型。
+失败表示规则分类可能生成无法通过发布校验的案由路径。"""
 
 import unittest
 
@@ -18,11 +12,11 @@ from tracks.legal_benchmark.taxonomy import infer_cause_path, validate_cause_pat
 
 class CausePathTests(unittest.TestCase):
     def test_default_leaf_is_in_controlled_taxonomy(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证无具体关键词时推断的默认案由仍属于受控 taxonomy。
+        准备数据：为五个主分类分别准备无特征文本。
+        调用函数：调用 infer_cause_path 后再调用 validate_cause_path。
+        预期结果：每条默认路径都返回合法。
+        该断言保护的行为：解析器回退规则不会生成无法发布的分类。"""
 
         for category in (
             "合同、准合同纠纷",

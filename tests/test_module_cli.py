@@ -1,14 +1,8 @@
-"""测试模块：tests/test_module_cli.py。
+"""模块导入与 CLI 帮助测试。
 
-本文件验证项目中的一个具体行为或模块边界。测试输入通常是内存中的最小样例，测试输出是断言结果，不调用真实模型 API。
-
-项目位置：tests/test_module_cli.py。
-主要用途：项目测试模块，验证公共基础层和三条评测线的行为、数据隔离与文档规范。
-输入：输入来自测试夹具、临时目录和项目模块。
-输出：输出为测试断言结果，不产生正式评测数据。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：通常只创建临时文件或调用测试替身，不调用真实模型 API。
-"""
+被测对象：三条评测线的新模块路径和十一条 python -m 命令。通过 importlib 与 subprocess 检查，不调用业务 run。
+不 mock 模型、不创建正式数据；--help 应在任何 API 配置缺失时仍退出 0。
+失败表示迁移后仍依赖旧根目录模块，或命令入口在参数解析前执行了副作用。"""
 
 import importlib
 import subprocess
@@ -50,22 +44,22 @@ CLI_MODULES = [
 
 class ModuleAndCliTests(unittest.TestCase):
     def test_all_tracks_import_without_legacy_packages(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证新模块都可导入且不依赖已删除的旧根目录包。
+        准备数据：准备公共层和三条评测线模块名列表。
+        调用函数：用 importlib.import_module 逐个导入。
+        预期结果：所有导入成功。
+        该断言保护的行为：模块化迁移没有遗留 runner、judge 等旧依赖。"""
 
         for module in MODULES:
             with self.subTest(module=module):
                 importlib.import_module(module)
 
     def test_all_documented_clis_support_help(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证 README 约定的十一条 python -m 命令均支持 --help。
+        准备数据：准备 CLI 模块名并使用当前 Python 启动子进程。
+        调用函数：逐个执行 python -m 模块 --help。
+        预期结果：每个退出码为 0 且输出帮助文本。
+        该断言保护的行为：命令入口不会在参数解析前要求 API 密钥或执行真实评测。"""
 
         for module in CLI_MODULES:
             with self.subTest(module=module):

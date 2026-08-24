@@ -1,14 +1,10 @@
-"""项目模块：tracks/legal_benchmark/dataset/split.py。
+"""法律题集案件级划分模块。
 
-本文件属于三条评测线或公共工具层的一部分，负责完成本文件名对应的处理步骤。输入来自上游函数或数据目录，输出返回给下游函数或写入对应结果目录。
-
-项目位置：tracks/legal_benchmark/dataset/split.py。
-主要用途：法律真实案例 Benchmark，负责判决书解析、结构化提取、出题、校验和法律评测。
-输入：输入来自法律线 data/raw、parsed、cleaned、drafts、releases 或 taxonomy/schema。
-输出：输出按生命周期写入法律线对应 data 子目录或 results 目录。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：ingestion/extraction/generation/evaluation 可能写文件；只有带模型选项时才调用模型。
-"""
+项目位置：dataset.build 使用的纯内存辅助模块。
+输入：包含 case_id 与案件主分类的候选题或正式题目列表。
+输出：为每条复制记录增加 dev、calibration 或 test 的 split 字段。
+上下游：由题集组装调用，结果随后进入正式 release 和验证阶段。
+副作用：不读写数据文件、不调用模型；使用固定随机种子保证重复运行一致。"""
 
 from __future__ import annotations
 
@@ -19,11 +15,14 @@ from typing import Any
 
 
 def _case_id(row: dict[str, Any]) -> str:
-    """读取一条题目或案件记录的案件标识。
+    """用途：从题目或案件记录中读取兼容的案件标识。
 
-    题目优先使用 ``case_id``，兼容旧的中间字段 ``based_on_case`` 和 ``id``。
-    返回空字符串表示输入没有可用案件标识；函数只读内存，不写文件。
-    """
+    输入：row 可能含 case_id、based_on_case 或 id。
+    输出：返回字符串案件标识；都缺失时返回空字符串。
+    运行前数据形态：输入字段命名可能来自不同管道阶段。
+    运行后数据变化：输出统一为分组所需 case_id。
+    副作用：只读字典，不写文件、不调用模型。
+    异常或失败处理：空值按兼容顺序回退，最终返回空字符串。"""
 
     value = row.get("case_id")
     if not value:
@@ -34,11 +33,14 @@ def _case_id(row: dict[str, Any]) -> str:
 
 
 def _primary_category(row: dict[str, Any]) -> str:
-    """读取案件级主分类，供分层抽样使用。
+    """用途：从解析案件或正式题目的分类对象中读取主分类。
 
-    解析案件使用 ``classification``，正式题目使用 ``case_classification``；
-    如果两者都没有，再尝试顶层字段，最终返回“未分类”。
-    """
+    输入：row 可能含 classification、case_classification 或顶层 primary_category。
+    输出：返回主分类字符串；均缺失时返回“未分类”。
+    运行前数据形态：运行前不同阶段分类字段位置不同。
+    运行后数据变化：运行后得到统一分层键。
+    副作用：只读字典，不写文件、不调用模型。
+    异常或失败处理：分类字段类型错误时忽略该来源并继续回退。"""
 
     classification = row.get("classification")
     if not isinstance(classification, dict):
@@ -56,13 +58,15 @@ def _primary_category(row: dict[str, Any]) -> str:
 
 
 def assign_case_splits(rows: list[dict[str, Any]], seed: int = 20260824) -> list[dict[str, Any]]:
-    """按案件而不是题目分配 ``dev``、``calibration``、``test``。
+    """用途：按 case_id 分组并按主分类分层分配 dev、calibration、test。
 
-    输入是候选题列表；函数先把相同 ``case_id`` 的题目放入同一组，
-    再按主分类分层并使用固定随机种子打乱案件顺序。输出是复制后的题目列表，
-    每题新增一个 ``split`` 字段，因此同案题目不会跨集合。函数不写文件。
-    例如同一案件有三道题，三道题最终会得到相同的 ``split``。
-    """
+    输入：rows 是案件或问题字典列表；seed 控制稳定随机顺序。
+    输出：返回逐行浅拷贝的新列表，每行新增或统一 split。
+    运行前数据形态：运行前同案多题尚无固定 split。
+    运行后数据变化：运行后同一 case_id 的全部题共享一个 split，固定 seed 可重复。
+    副作用：只处理内存，不写文件、不调用模型，也不修改输入字典。
+    异常或失败处理：缺 case_id 的行会作为同一空标识组；小样本按比例回退，十案及以上按 3/2/其余分配。
+    最小示例：某分类十个案件会得到 3 dev、2 calibration、5 test。"""
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         groups[_case_id(row)].append(row)

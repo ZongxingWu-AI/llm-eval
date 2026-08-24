@@ -1,14 +1,8 @@
-"""测试模块：tests/test_legal_manifest.py。
+"""法律原始案例 manifest 回归测试。
 
-本文件验证项目中的一个具体行为或模块边界。测试输入通常是内存中的最小样例，测试输出是断言结果，不调用真实模型 API。
-
-项目位置：tests/test_legal_manifest.py。
-主要用途：项目测试模块，验证公共基础层和三条评测线的行为、数据隔离与文档规范。
-输入：输入来自测试夹具、临时目录和项目模块。
-输出：输出为测试断言结果，不产生正式评测数据。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：通常只创建临时文件或调用测试替身，不调用真实模型 API。
-"""
+被测模块：clean_directory。使用 TemporaryDirectory 创建同名但内容变化的本地案例与输出文件。
+不调用模型，不接触正式 raw 数据。
+失败表示解析器可能只按文件名跳过变化内容，破坏哈希和 case_id 的可追溯性。"""
 
 import tempfile
 import unittest
@@ -24,11 +18,11 @@ DOCUMENT_TEMPLATE = """某某人民法院\n民事判决书\n（2024）浙0000民
 
 class LegalManifestTests(unittest.TestCase):
     def test_same_filename_with_changed_content_is_reprocessed(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证同名原始文件正文变化后不会沿用旧案件身份。
+        准备数据：在临时 raw 写入文件，解析一次后改正文再解析。
+        调用函数：两次调用 clean_directory 并读取结果。
+        预期结果：两次 sha256 和 case_id 不同，manifest 跟随新内容。
+        该断言保护的行为：增量制作数据时不能仅凭文件名错误跳过已更新案例。"""
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

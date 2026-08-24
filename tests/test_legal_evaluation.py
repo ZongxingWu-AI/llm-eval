@@ -1,14 +1,8 @@
-"""测试模块：tests/test_legal_evaluation.py。
+"""法律评测执行测试。
 
-本文件验证项目中的一个具体行为或模块边界。测试输入通常是内存中的最小样例，测试输出是断言结果，不调用真实模型 API。
-
-项目位置：tests/test_legal_evaluation.py。
-主要用途：项目测试模块，验证公共基础层和三条评测线的行为、数据隔离与文档规范。
-输入：输入来自测试夹具、临时目录和项目模块。
-输出：输出为测试断言结果，不产生正式评测数据。
-上下游关系：本文件承接上游输入，并把返回值或生成文件交给同一评测线的下游步骤。
-副作用：通常只创建临时文件或调用测试替身，不调用真实模型 API。
-"""
+被测模块：evaluation.run。覆盖逐题模型元数据、按 split/task_type 报告和法律结果目录隔离。
+模型与客户端构建均使用 mock，文件测试使用 TemporaryDirectory，不调用真实 API。
+失败表示正式题 schema、报告分组或结果写入边界发生回归。"""
 
 import json
 import tempfile
@@ -24,11 +18,12 @@ from tracks.legal_benchmark.evaluation.run import build_report, evaluate_questio
 
 class LegalEvaluationTests(unittest.TestCase):
     def setUp(self):
-        """为当前测试准备独立的临时目录、样例数据或 mock 环境。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：测试运行环境隔离。
+准备数据：创建本测试类需要的临时目录、样例输入和 mock 对象。
+调用函数：调用 unittest 的 setUp 初始化逻辑。
+预期结果：每个测试从独立环境开始。
+该断言保护的行为：保护测试之间不共享临时文件，也不污染正式结果目录。
+副作用：只使用 mock、AST 或临时数据，不调用真实模型，不写入正式数据目录。"""
 
         self.question = {
             "question_id": "legal_case_1_01",
@@ -48,11 +43,11 @@ class LegalEvaluationTests(unittest.TestCase):
 
     @patch("tracks.legal_benchmark.evaluation.run.llm_client.call_model")
     def test_evaluate_questions_uses_new_schema_and_records_call_metadata(self, call_model):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self、call_model。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证法律逐题结果使用新 schema 并记录模型调用元数据。
+        准备数据：准备一条正式题，mock 被测模型回答和延迟/token。
+        调用函数：调用 evaluate_questions。
+        预期结果：结果含 question_id、case_id、model_answer、verdict、latency 和 total_tokens。
+        该断言保护的行为：评测产物可追踪模型调用且不回退旧字段。"""
 
         call_model.return_value = ("卢某应支付货款。", 0.25, 42, "stop")
         rows, errors = evaluate_questions([self.question], object(), "contestant", None, None)
@@ -63,11 +58,11 @@ class LegalEvaluationTests(unittest.TestCase):
         self.assertEqual(rows[0]["total_tokens"], 42)
 
     def test_report_groups_by_split_and_task_type(self):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证 Markdown 报告按 split 和 task_type 汇总 verdict。
+        准备数据：准备不同 split、任务类型和 verdict 的结果行。
+        调用函数：调用 build_report。
+        预期结果：报告文本出现对应分组名称和计数。
+        该断言保护的行为：项目报告能比较开发集、校准集、测试集及任务能力。"""
 
         report = build_report([
             {"question_id": "q1", "split": "dev", "task_type": "事实抽取", "scoring_method": "rule", "verdict": "PASS"},
@@ -82,11 +77,11 @@ class LegalEvaluationTests(unittest.TestCase):
     @patch("tracks.legal_benchmark.evaluation.run.llm_client.load_env")
     @patch("tracks.legal_benchmark.evaluation.run.llm_client.call_model", return_value=("卢某应支付货款。", 0.1, 8, "stop"))
     def test_run_writes_only_to_requested_legal_output(self, call_model, load_env, read_role, build_client):
-        """验证一个预期行为，失败时应优先检查断言对应的实现边界。
-
-参数：self、call_model、load_env、read_role、build_client。
-返回：根据函数实现返回处理结果，或在输入不合法时抛出异常。
-数据变化：调用前接收上游的原始值或结构化对象，调用后返回更适合下游使用的值；如果函数写文件或改变环境，会在实现中明确说明。"""
+        """测试目标：验证法律 run 只写指定法律输出目录。
+        准备数据：用临时题集和输出目录，mock 客户端构建与模型调用。
+        调用函数：调用 evaluation.run。
+        预期结果：目标目录出现法律结果、错误、报告和元数据，返回路径正确。
+        该断言保护的行为：第三条评测线不会污染 C-Eval 或 Pairwise 结果目录。"""
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
