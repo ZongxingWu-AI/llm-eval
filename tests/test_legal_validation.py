@@ -4,9 +4,12 @@
 使用内存题目和案件，不写报告、不调用模型。
 失败表示不可追溯引用或数据泄漏可能未被发布前检查发现。"""
 
+import importlib
 import unittest
 
-from tracks.legal_benchmark.validation.validate import check_row, validate
+_validation = importlib.import_module("methodology.02_构建题集.legal.validation.validate")
+check_row = _validation.check_row
+validate = _validation.validate
 
 class LegalValidationTests(unittest.TestCase):
 

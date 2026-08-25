@@ -5,11 +5,13 @@
 失败表示解析器可能只按文件名跳过变化内容，破坏哈希和 case_id 的可追溯性。"""
 
 import tempfile
+import importlib
 import unittest
 from pathlib import Path
 
 from core.data_io import read_jsonl
-from tracks.legal_benchmark.ingestion.clean import clean_directory
+_clean_module = importlib.import_module("methodology.01_造Benchmark.legal.ingestion.clean")
+clean_directory = _clean_module.clean_directory
 
 
 

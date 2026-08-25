@@ -4,6 +4,7 @@
 模型与客户端构建均使用 mock，文件测试使用 TemporaryDirectory，不调用真实 API。
 失败表示正式题 schema、报告分组或结果写入边界发生回归。"""
 
+import importlib
 import json
 import tempfile
 import unittest
@@ -11,9 +12,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from core.data_io import read_jsonl, write_jsonl
-from tracks.legal_benchmark.evaluation.run import build_report, evaluate_questions, run
 
-from tracks.legal_benchmark.evaluation.run import build_report, evaluate_questions, run
+_evaluation_module = importlib.import_module("methodology.04_跑项目.legal.evaluation.run")
+build_report = _evaluation_module.build_report
+evaluate_questions = _evaluation_module.evaluate_questions
+run = _evaluation_module.run
 
 
 class LegalEvaluationTests(unittest.TestCase):
@@ -41,7 +44,7 @@ class LegalEvaluationTests(unittest.TestCase):
             "source_evidence": [{"source_section": "judgment", "source_quote": "卢某支付货款"}],
         }
 
-    @patch("tracks.legal_benchmark.evaluation.run.llm_client.call_model")
+    @patch.object(_evaluation_module.llm_client, "call_model")
     def test_evaluate_questions_uses_new_schema_and_records_call_metadata(self, call_model):
         """测试目标：验证法律逐题结果使用新 schema 并记录模型调用元数据。
         准备数据：准备一条正式题，mock 被测模型回答和延迟/token。
@@ -72,10 +75,10 @@ class LegalEvaluationTests(unittest.TestCase):
         self.assertIn("事实抽取", report)
         self.assertIn("PASS 1", report)
 
-    @patch("tracks.legal_benchmark.evaluation.run.llm_client.build_client", return_value=object())
-    @patch("tracks.legal_benchmark.evaluation.run.llm_client.read_role", return_value=("base", "key", "contestant"))
-    @patch("tracks.legal_benchmark.evaluation.run.llm_client.load_env")
-    @patch("tracks.legal_benchmark.evaluation.run.llm_client.call_model", return_value=("卢某应支付货款。", 0.1, 8, "stop"))
+    @patch.object(_evaluation_module.llm_client, "build_client", return_value=object())
+    @patch.object(_evaluation_module.llm_client, "read_role", return_value=("base", "key", "contestant"))
+    @patch.object(_evaluation_module.llm_client, "load_env")
+    @patch.object(_evaluation_module.llm_client, "call_model", return_value=("卢某应支付货款。", 0.1, 8, "stop"))
     def test_run_writes_only_to_requested_legal_output(self, call_model, load_env, read_role, build_client):
         """测试目标：验证法律 run 只写指定法律输出目录。
         准备数据：用临时题集和输出目录，mock 客户端构建与模型调用。

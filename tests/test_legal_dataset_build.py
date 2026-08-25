@@ -4,9 +4,11 @@
 不使用 mock、不写文件、不调用模型。
 失败表示待审题可能错误进入 release，或分类和 split 约束被破坏。"""
 
+import importlib
 import unittest
 
-from tracks.legal_benchmark.dataset.build import build
+_build_module = importlib.import_module("methodology.02_构建题集.legal.dataset.build")
+build = _build_module.build
 
 
 class DatasetBuildTests(unittest.TestCase):

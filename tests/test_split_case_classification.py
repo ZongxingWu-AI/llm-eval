@@ -4,9 +4,11 @@
 不使用 mock、不写文件、不调用模型。
 失败表示题集组装可能把所有候选题错误归入“未分类”。"""
 
+import importlib
 import unittest
 
-from tracks.legal_benchmark.dataset.split import assign_case_splits
+_split_module = importlib.import_module("methodology.02_构建题集.legal.dataset.split")
+assign_case_splits = _split_module.assign_case_splits
 
 
 class SplitCaseClassificationTests(unittest.TestCase):

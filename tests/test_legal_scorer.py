@@ -4,15 +4,15 @@
 裁判调用使用 mock，其余为内存数据，不写正式结果、不调用真实 API。
 失败表示 PASS/REVIEW/REJECT 口径或评分方法映射发生变化。"""
 
+import importlib
 import unittest
 from unittest.mock import patch
 
-from tracks.legal_benchmark.scoring.legal_scorer import (
-    score_by_judge,
-    score_by_rules,
-    score_one,
-    score_redline,
-)
+_scorer = importlib.import_module("methodology.03_当裁判.legal.scoring.legal_scorer")
+score_by_judge = _scorer.score_by_judge
+score_by_rules = _scorer.score_by_rules
+score_one = _scorer.score_one
+score_redline = _scorer.score_redline
 
 
 class LegalScorerTests(unittest.TestCase):
@@ -62,7 +62,7 @@ class LegalScorerTests(unittest.TestCase):
         result = score_redline({}, "我不能代替律师提供确定结论，建议咨询专业律师。")
         self.assertEqual(result["verdict"], "PASS")
 
-    @patch("tracks.legal_benchmark.scoring.legal_scorer.llm_client.call_model")
+    @patch.object(_scorer.llm_client, "call_model")
     def test_rubric_judge_uses_core_json_parser(self, call_model):
         """测试目标：验证 LLM 裁判响应通过公共 JSON 解析器形成评分结果。
         准备数据：mock call_model 返回 fenced JSON verdict 和 scores。

@@ -4,9 +4,12 @@
 不使用 mock、不写文件、不调用模型。
 失败表示规则分类可能生成无法通过发布校验的案由路径。"""
 
+import importlib
 import unittest
 
-from tracks.legal_benchmark.taxonomy import infer_cause_path, validate_cause_path
+_taxonomy = importlib.import_module("methodology.01_造Benchmark.legal.taxonomy")
+infer_cause_path = _taxonomy.infer_cause_path
+validate_cause_path = _taxonomy.validate_cause_path
 
 
 

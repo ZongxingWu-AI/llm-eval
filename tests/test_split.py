@@ -4,9 +4,11 @@
 全部使用内存字典，不写文件、不调用模型。
 失败表示 dev/calibration/test 不可重复或发生同案泄漏。"""
 
+import importlib
 import unittest
 
-from tracks.legal_benchmark.dataset.split import assign_case_splits
+_split_module = importlib.import_module("methodology.02_构建题集.legal.dataset.split")
+assign_case_splits = _split_module.assign_case_splits
 
 
 class SplitTests(unittest.TestCase):

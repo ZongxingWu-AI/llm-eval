@@ -1,12 +1,14 @@
 """法律判决书无损解析测试。
 
-被测模块：tracks.legal_benchmark.ingestion.clean。覆盖全文保留、主要章节、多方当事人、哈希和质量元数据。
+被测模块：methodology.01_造Benchmark.legal.ingestion.clean。覆盖全文保留、主要章节、多方当事人、哈希和质量元数据。
 使用内存判决书样例，不调用模型、不写正式 raw/parsed。
 失败表示清洗可能丢失法院说理、判决主文或错误遗漏当事人。"""
 
+import importlib
 import unittest
 
-from tracks.legal_benchmark.ingestion.clean import parse_judgment
+_clean_module = importlib.import_module("methodology.01_造Benchmark.legal.ingestion.clean")
+parse_judgment = _clean_module.parse_judgment
 
 SAMPLE = """
 民事判决书
@@ -67,4 +69,3 @@ class LegalIngestionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
