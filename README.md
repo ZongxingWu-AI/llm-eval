@@ -1,8 +1,6 @@
-# llm-eval：法律真实案例 Benchmark 项目
+# llm-eval：法律 Benchmark 项目
 
-本仓库当前只承载第三条线：基于真实民事一审判决书构建法律领域大模型评测集。
-C-Eval 与 LLM-as-Judge 已独立迁移到 ``C:\\CEval-LLMJudge``，法律项目不通过路径、
-``sys.path`` 或业务导入依赖外部项目；两个项目各自保留一份公共基础层。
+本仓库当前承载：基于真实民事一审判决书构建法律领域大模型评测集。
 
 ## 项目结构
 
@@ -19,7 +17,7 @@ C:\\llm-eval\\
 └── .env
 ```
 
-## 四个教学环节
+## 四个环节
 
 1. **造 Benchmark**：raw 判决书 → parsed 案件 → cleaned 法律信息。
 2. **构建题集**：结构化案件 → 候选题 → 人工审核 → release → 案件级 split。

@@ -8,7 +8,7 @@
 
 | 文件 | 作用 |
 |---|---|
-| `raw_manifest.jsonl` | 每份本地原始判决书一条记录。 |
+| `raw_selected_50_manifest.jsonl` | 每份本地原始判决书一条记录。 |
 | `release_manifest.json` | 一次正式题集发布的版本、数量和来源摘要。 |
 | `validation_report.jsonl` | 每道题的校验状态和问题。 |
 

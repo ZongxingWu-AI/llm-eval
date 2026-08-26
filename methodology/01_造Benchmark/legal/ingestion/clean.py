@@ -20,6 +20,9 @@ from core.data_io import write_jsonl
 from core.project_paths import LEGAL_DATA_ROOT as DATA_ROOT
 
 PARSER_VERSION = "legal-parser-v3"
+DEFAULT_RAW_DIR = DATA_ROOT / "raw_selected_50"
+DEFAULT_PARSED_OUTPUT = DATA_ROOT / "parsed" / "parsed_judgments_selected_50.jsonl"
+DEFAULT_MANIFEST_OUTPUT = DATA_ROOT / "manifests" / "raw_selected_50_manifest.jsonl"
 ROLE_LABELS = ("原告", "被告", "第三人", "申请人", "被申请人", "上诉人", "被上诉人", "委托诉讼代理人", "诉讼代理人", "法定代表人")
 SECTION_MARKERS = {
     "claims": ("诉讼请求", "请求事项"),
@@ -497,7 +500,7 @@ def parse_judgment(text: str, source_file: str = "") -> dict:
     }
 
 
-def clean_directory(raw_dir: str | Path = DATA_ROOT / "raw", output_path: str | Path = DATA_ROOT / "parsed" / "parsed_judgments.jsonl",
+def clean_directory(raw_dir: str | Path = DEFAULT_RAW_DIR, output_path: str | Path = DEFAULT_PARSED_OUTPUT,
                     max_items: int | None = None, manifest_output: str | Path | None = None) -> list[dict]:
     """用途：批量读取 raw 判决书，调用 parse_judgment，并写出解析结果与本地来源清单。
 
@@ -521,7 +524,7 @@ def clean_directory(raw_dir: str | Path = DATA_ROOT / "raw", output_path: str | 
     if manifest_output:
         manifest_path = Path(manifest_output)
     else:
-        manifest_path = DATA_ROOT / "manifests" / "raw_manifest.jsonl"
+        manifest_path = DEFAULT_MANIFEST_OUTPUT
     manifests: list[dict] = []
     for row in rows:
         source = row["source"]
@@ -550,9 +553,9 @@ def main() -> None:
     异常或失败处理：参数解析错误由 argparse 退出；文件处理异常向上抛出并产生非零退出码。"""
 
     parser = argparse.ArgumentParser(description="无损解析本地民事判决书")
-    parser.add_argument("--raw-dir", "--input", default=str(DATA_ROOT / "raw"), help="原始判决书目录")
-    parser.add_argument("--output", default=str(DATA_ROOT / "parsed" / "parsed_judgments.jsonl"), help="解析结果 JSONL")
-    parser.add_argument("--manifest-output", default=str(DATA_ROOT / "manifests" / "raw_manifest.jsonl"), help="本地来源清单 JSONL")
+    parser.add_argument("--raw-dir", "--input", default=str(DEFAULT_RAW_DIR), help="原始判决书目录")
+    parser.add_argument("--output", default=str(DEFAULT_PARSED_OUTPUT), help="解析结果 JSONL")
+    parser.add_argument("--manifest-output", default=str(DEFAULT_MANIFEST_OUTPUT), help="本地来源清单 JSONL")
     parser.add_argument("--max-items", "--max-cases", type=int, default=None, help="只处理前 N 份")
     args = parser.parse_args()
     rows = clean_directory(args.raw_dir, args.output, args.max_items, args.manifest_output)

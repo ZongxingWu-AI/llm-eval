@@ -6,10 +6,10 @@
 
 ## 2. 数据来源和文件命名
 
-输入来自 `../raw/`，默认输出为：
+输入来自 `../raw_selected_50/`，默认输出为：
 
 ```text
-parsed_judgments.jsonl
+parsed_judgments_selected_50.jsonl
 ```
 
 试跑文件可以使用带有案例名的 JSONL 文件，但仍应保留 `case_id` 和 `source.sha256`。

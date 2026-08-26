@@ -19,6 +19,7 @@ from core.run_metadata import new_run_metadata
 from core.project_paths import LEGAL_DATA_ROOT as DATA_ROOT, LEGAL_PROMPT_ROOT as PROMPT_ROOT
 
 EXTRACTOR_VERSION = "legal-extractor-v1"
+DEFAULT_PARSED_INPUT = DATA_ROOT / "parsed" / "parsed_judgments_selected_50.jsonl"
 
 
 def _sentences(text: str) -> list[str]:
@@ -165,7 +166,7 @@ def extract_case(case: dict, client=None, model: str = "") -> dict:
     return result
 
 
-def run(input_path: str | Path = DATA_ROOT / "parsed" / "parsed_judgments.jsonl",
+def run(input_path: str | Path = DEFAULT_PARSED_INPUT,
         output_path: str | Path = DATA_ROOT / "cleaned" / "structured_cases.jsonl",
         max_items: int | None = None, use_llm: bool = False) -> list[dict]:
     """用途：批量读取 parsed JSONL，执行结构化法律提取并写入 cleaned JSONL 和运行元数据。
@@ -208,7 +209,7 @@ def main() -> None:
     异常或失败处理：参数错误由 argparse 处理；run 抛出的异常转换为非零退出。"""
 
     parser = argparse.ArgumentParser(description="提取带原文定位的法律结构化信息")
-    parser.add_argument("--input", default=str(DATA_ROOT / "parsed" / "parsed_judgments.jsonl"), help="解析后案件 JSONL")
+    parser.add_argument("--input", default=str(DEFAULT_PARSED_INPUT), help="解析后案件 JSONL")
     parser.add_argument("--output", default=str(DATA_ROOT / "cleaned" / "structured_cases.jsonl"), help="结构化案件 JSONL")
     parser.add_argument("--max-items", "--max-cases", type=int, default=None, help="只处理前 N 案")
     parser.add_argument("--use-llm", action="store_true", help="使用模型提取；不传则使用可重复的规则提取")
