@@ -15,13 +15,17 @@ methodology/01_造Benchmark/legal/data/raw_selected_50/**
 # 可重新生成的法律中间文件
 methodology/01_造Benchmark/legal/data/parsed/**
 !methodology/01_造Benchmark/legal/data/parsed/README.md
+!methodology/01_造Benchmark/legal/data/parsed/parsed_judgments_selected_50.jsonl
 methodology/01_造Benchmark/legal/data/cleaned/**
 !methodology/01_造Benchmark/legal/data/cleaned/README.md
+!methodology/01_造Benchmark/legal/data/cleaned/structured_cases.jsonl
 methodology/01_造Benchmark/legal/data/drafts/**
 !methodology/01_造Benchmark/legal/data/drafts/README.md
 methodology/01_造Benchmark/legal/data/releases/**
 !methodology/01_造Benchmark/legal/data/releases/README.md
 methodology/01_造Benchmark/legal/data/manifests/**
 !methodology/01_造Benchmark/legal/data/manifests/README.md
+!methodology/01_造Benchmark/legal/data/manifests/raw_selected_50_manifest.jsonl
+!methodology/01_造Benchmark/legal/data/manifests/selected_50_selection.jsonl
 methodology/01_造Benchmark/legal/results/**
 !methodology/01_造Benchmark/legal/results/README.md
