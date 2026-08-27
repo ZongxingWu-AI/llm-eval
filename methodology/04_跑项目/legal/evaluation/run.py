@@ -1,7 +1,7 @@
 """法律真实案例评测执行模块。
 
 项目位置：法律 Benchmark 的 evaluation 阶段。
-输入：通过验证的 releases/legal_questions.jsonl 和环境变量中的被测/裁判模型配置。
+输入：命令行指定的正式题集 JSONL 和环境变量中的被测/裁判模型配置。
 输出：法律线 results 下独立运行目录，包含逐题 JSONL、错误、Markdown 报告、元数据和可选 Excel。
 上下游：上游是冻结并验证后的题集，下游是失败分析、模型比较和项目报告。
 副作用：调用被测模型，rubric_judge 题还调用裁判模型；只写法律线结果目录。"""
@@ -19,7 +19,7 @@ from typing import Any
 from core import llm_client
 from core.data_io import read_jsonl, write_jsonl
 from core.run_metadata import new_run_metadata, timestamped_run_dir
-from core.project_paths import LEGAL_DATA_ROOT as DATA_ROOT, LEGAL_RESULTS_ROOT as RESULTS_ROOT
+from core.project_paths import LEGAL_RESULTS_ROOT as RESULTS_ROOT
 from .excel_export import export_jsonl
 _legal_scorer_module = importlib.import_module("methodology.03_当裁判.legal.scoring.legal_scorer")
 legal_scorer = _legal_scorer_module
@@ -100,7 +100,7 @@ def build_report(results: list[dict[str, Any]]) -> str:
     输入：results 是 evaluate_questions 的成功结果列表。
     输出：返回包含总数、总体 verdict、按 split 和 task_type 分组统计的 Markdown 字符串。
     运行前数据形态：运行前是结构化 JSON 结果。
-    运行后数据变化：运行后变成可写入 legal_report.md 的文本。
+    运行后数据变化：运行后变成可写入 legal_evaluation_report.md 的文本。
     副作用：只处理内存，不写文件、不调用模型。
     异常或失败处理：空结果仍返回合法报告并显示零数量。"""
     total_counts: Counter[str] = Counter()
@@ -163,7 +163,7 @@ def _build_clients(questions: list[dict[str, Any]]) -> tuple[Any, str, Any, str 
 
 
 def run(
-    input_path: str | Path = DATA_ROOT / "releases" / "legal_questions.jsonl",
+    input_path: str | Path,
     output_dir: str | Path | None = None,
     max_items: int | None = None,
 ) -> tuple[list[dict[str, Any]], Path]:
@@ -173,7 +173,7 @@ def run(
     输出：返回 (逐题成功结果, 实际运行目录 Path)。
     运行前数据形态：运行前是一行一道冻结题目。
     运行后数据变化：运行后每次评测拥有独立结果目录，不污染 C-Eval 或 Pairwise Judge。
-    副作用：调用被测模型和可能的裁判模型；创建目录并写 legal_results.jsonl、errors.jsonl、legal_report.md、run_metadata.json 和可选 xlsx。
+    副作用：调用被测模型和可能的裁判模型；创建目录并写 legal_evaluation_results.jsonl、legal_evaluation_errors.jsonl、legal_evaluation_report.md、run_metadata.json 和可选 xlsx。
     异常或失败处理：题集不存在时抛出 FileNotFoundError；Excel 导出失败只写 excel_error.txt，不影响 JSON 结果。"""
     source = Path(input_path)
     if not source.is_file():
@@ -187,10 +187,10 @@ def run(
     )
     run_dir = Path(output_dir) if output_dir else timestamped_run_dir(RESULTS_ROOT)
     run_dir.mkdir(parents=True, exist_ok=True)
-    result_path = run_dir / "legal_results.jsonl"
+    result_path = run_dir / "legal_evaluation_results.jsonl"
     write_jsonl(result_path, results)
-    write_jsonl(run_dir / "errors.jsonl", errors)
-    (run_dir / "legal_report.md").write_text(build_report(results), encoding="utf-8")
+    write_jsonl(run_dir / "legal_evaluation_errors.jsonl", errors)
+    (run_dir / "legal_evaluation_report.md").write_text(build_report(results), encoding="utf-8")
     metadata = new_run_metadata(
         "legal_benchmark.evaluation", input=str(source), output=str(run_dir),
         question_count=len(questions), result_count=len(results), error_count=len(errors),
@@ -201,7 +201,7 @@ def run(
         json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8",
     )
     try:
-        export_jsonl(result_path, run_dir / "legal_results.xlsx")
+        export_jsonl(result_path, run_dir / "legal_evaluation_results.xlsx")
     except Exception as exc:
         (run_dir / "excel_error.txt").write_text(str(exc), encoding="utf-8")
     print(f"结果目录：{run_dir}")
@@ -211,7 +211,7 @@ def run(
 def main() -> None:
     """用途：提供法律评测 CLI，把题集路径、输出目录和最大题数传给 run。
 
-    输入：参数来自 argparse，默认读取 releases/legal_questions.jsonl 并创建时间戳结果目录。
+    输入：题集路径由 --input 显式提供；未指定输出目录时创建时间戳结果目录。
     输出：成功时打印结果目录；失败打印错误并以状态码 1 退出。
     运行前数据形态：运行前是冻结题集与命令行参数。
     运行后数据变化：运行后生成完整逐题结果、错误、报告和元数据。
@@ -219,7 +219,7 @@ def main() -> None:
     异常或失败处理：参数错误由 argparse 处理；run 异常转换为非零退出。"""
 
     parser = argparse.ArgumentParser(description="运行法律真实案例 Benchmark 评测")
-    parser.add_argument("--input", default=str(DATA_ROOT / "releases" / "legal_questions.jsonl"), help="正式题集 JSONL")
+    parser.add_argument("--input", required=True, help="正式题集 JSONL")
     parser.add_argument("--output", help="本次运行输出目录；默认写入法律线 results/时间戳目录")
     parser.add_argument("--max-items", "--max-questions", type=int, default=None, help="只评测前 N 题")
     args = parser.parse_args()
@@ -232,6 +232,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-

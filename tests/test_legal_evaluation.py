@@ -94,12 +94,12 @@ class LegalEvaluationTests(unittest.TestCase):
             rows, actual_dir = run(input_path, output_dir, max_items=1)
             self.assertEqual(actual_dir, output_dir)
             self.assertEqual(len(rows), 1)
-            self.assertTrue((output_dir / "legal_results.jsonl").is_file())
-            self.assertTrue((output_dir / "legal_report.md").is_file())
+            self.assertTrue((output_dir / "legal_evaluation_results.jsonl").is_file())
+            self.assertTrue((output_dir / "legal_evaluation_report.md").is_file())
             self.assertTrue((output_dir / "run_metadata.json").is_file())
             metadata = json.loads((output_dir / "run_metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["track"], "legal_benchmark.evaluation")
-            self.assertEqual(read_jsonl(output_dir / "legal_results.jsonl")[0]["case_id"], "case_1")
+            self.assertEqual(read_jsonl(output_dir / "legal_evaluation_results.jsonl")[0]["case_id"], "case_1")
 
 
 if __name__ == "__main__":

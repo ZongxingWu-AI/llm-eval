@@ -1,60 +1,48 @@
-# llm-eval：法律 Benchmark 项目
+# 法律真实案例 Benchmark
 
-本仓库当前承载：基于真实民事一审判决书构建法律领域大模型评测集。
-
-## 项目结构
+本仓库按“造 Benchmark → 构建题集 → 当裁判 → 跑项目”组织法律评测流程。核心数据链路是：
 
 ```text
-C:\\llm-eval\\
-├── core\\                         # 法律项目公共基础层
-├── methodology\\
-│   ├── 01_造Benchmark\\legal\\   # 原始判决书解析和法律信息提取
-│   ├── 02_构建题集\\legal\\       # 候选题、审核、正式题集和 split
-│   ├── 03_当裁判\\legal\\         # 法律规则、红线和 Rubric 评分
-│   └── 04_跑项目\\legal\\         # 批量评测、报告和结果导出
-├── tests\\                         # 法律线测试
-├── 学习文档\\
-└── .env
+raw → clean → extract → drafts → releases → validation → evaluation
 ```
 
-## 四个环节
+## 快速入口
 
-1. **造 Benchmark**：raw 判决书 → parsed 案件 → cleaned 法律信息。
-2. **构建题集**：结构化案件 → 候选题 → 人工审核 → release → 案件级 split。
-3. **当裁判**：被测回答与参考答案、Rubric 和来源证据对照，输出 PASS/REVIEW/REJECT。
-4. **跑项目**：批量调用被测模型和评分器，生成逐题结果、错误、报告和运行元数据。
+- `methodology/01_造Benchmark/legal/ingestion/clean.py`：不调用模型，把 raw 判决书无损解析为 clean 案件 JSONL。
+- `methodology/01_造Benchmark/legal/extraction/extract.py`：从 clean 案件提取法律信息；可选 `--use-llm`。
+- `methodology/02_构建题集/legal/generation/generate.py`：从 extract 案件生成待审核候选题。
+- `methodology/02_构建题集/legal/dataset/build.py`：把审核通过的候选题组装成 release。
+- `methodology/02_构建题集/legal/validation/validate.py`：验证题集结构、来源证据和案件一致性。
+- `methodology/04_跑项目/legal/evaluation/run.py`：使用环境变量中的模型配置执行评测。
 
-法律线的手动入口依次是：
+## 数据批次
+
+正式数据按批次放在：
+
+```text
+methodology/01_造Benchmark/legal/data/datasets/<dataset_id>/
+```
+
+当前已迁移的批次是 `legal_20260827_001`。批次 ID 中的日期是创建日期，序号不是案例数量；文件名也不编码数量。因此新增 51 条、100 条或另一批案例时，只需创建新的批次目录，并在命令行指定对应路径。
+
+## 第一、二步示例
 
 ```powershell
-Set-Location C:\\llm-eval
-python -m methodology.01_造Benchmark.legal.ingestion.clean --help
-python -m methodology.01_造Benchmark.legal.extraction.extract --help
-python -m methodology.02_构建题集.legal.generation.generate --help
-python -m methodology.02_构建题集.legal.dataset.build --help
-python -m methodology.02_构建题集.legal.validation.validate --help
-python -m methodology.04_跑项目.legal.evaluation.run --help
+python -m methodology.01_造Benchmark.legal.ingestion.clean `
+  --raw-dir ".../data/datasets/legal_20260827_001/raw" `
+  --output ".../data/datasets/legal_20260827_001/clean/legal_cases_clean.jsonl" `
+  --manifest-output ".../data/datasets/legal_20260827_001/manifests/legal_sources.jsonl"
+
+python -m methodology.01_造Benchmark.legal.extraction.extract `
+  --input ".../data/datasets/legal_20260827_001/clean/legal_cases_clean.jsonl" `
+  --output ".../data/datasets/legal_20260827_001/extract/legal_cases_extract.jsonl" `
+  --use-llm
 ```
 
-## 法律数据生命周期
+所有与具体数据集有关的输入输出路径都由命令行传入；`--max-items` 只是试跑限制，不能代替输出文件命名。案件级追踪依赖 `case_id`、`source.sha256`，运行级追踪依赖 metadata 和 manifest。
 
-```text
-data/raw 或 data/raw_selected_50
-    ↓ clean.py
-parsed
-    ↓ extract.py
-cleaned
-    ↓ generate.py + 人工审核
- drafts
-    ↓ build.py
-releases
-    ↓ validate.py
-法律评测结果目录
-```
+## 其他目录
 
-raw 判决书、中间 JSONL、候选题、运行结果和本地 manifest 只在本地使用，均由
-``.gitignore`` 忽略；README、Prompt、Schema、Taxonomy 和代码可以提交。
-不要把 API 密钥写入仓库，也不要执行跨项目复制原始法律数据。
-
-详细学习地图见 ``methodology/README.md`` 和四个教学目录中的 ``README.md``、
-``module_map.md``、``learning_order.md``。
+- `core/`：公共数据读写、模型客户端、Prompt 和运行元数据工具。
+- `学习文档/`：学习笔记和面试复习材料。
+- `tests/`：法律链路的契约、manifest、CLI 和生成逻辑测试。

@@ -6,6 +6,7 @@ core.project_paths 读取真实路径；本文件保留法律线易读的本地�
 """
 
 from core.project_paths import LEGAL_DATA_ROOT as DATA_ROOT
+DATASETS_ROOT = DATA_ROOT / "datasets"
 from core.project_paths import LEGAL_PROMPT_ROOT as PROMPT_ROOT
 from core.project_paths import LEGAL_RESULTS_ROOT as RESULTS_ROOT
 from core.project_paths import LEGAL_SCHEMA_ROOT as SCHEMA_ROOT

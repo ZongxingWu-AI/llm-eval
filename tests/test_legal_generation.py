@@ -2,7 +2,7 @@
 
 被测模块：generation.generate。覆盖候选题生成的 JSONL 读写、模型调用路由、来源证据过滤和 pending 状态。
 模型调用使用 mock，不访问真实 API。
-失败表示生成阶段无法从 cleaned 案件稳定写出 drafts，导致后续题集构建无法启动。
+失败表示生成阶段无法从 extract 案件稳定写出 drafts，导致后续题集构建无法启动。
 """
 
 import importlib
@@ -21,7 +21,7 @@ run = _generation_module.run
 class LegalGenerationTests(unittest.TestCase):
     def _case(self):
         """测试目标：生成阶段最小案件夹具。
-        准备数据：提供带章节文本、案件分类和案件 ID 的 cleaned 案件。
+        准备数据：提供带章节文本、案件分类和案件 ID 的 extract 案件。
         调用函数：由 run 读取并传入候选题生成逻辑。
         预期结果：模型生成的 source_evidence 可以回查到指定章节。
         该断言保护的行为：候选题必须保留案件来源定位，不能脱离原文生成。
@@ -78,7 +78,7 @@ class LegalGenerationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             input_path = root / "cases.jsonl"
-            output_path = root / "drafts" / "candidate_questions.jsonl"
+            output_path = root / "drafts" / "legal_questions_draft.jsonl"
             write_jsonl(input_path, [self._case()])
 
             rows = run(input_path, output_path, max_items=1, questions_per_case=2)

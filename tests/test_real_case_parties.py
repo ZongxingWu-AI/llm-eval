@@ -20,6 +20,8 @@ class RealCasePartyExtractionTests(unittest.TestCase):
         该断言保护的行为：规则在真实文书上兼顾多方识别和误报控制。"""
 
         source = Path("methodology/01_造Benchmark/legal/data/raw/（2024）浙0483民初5218号.md")
+        if not source.is_file():
+            self.skipTest(f"本地回归案例不存在：{source}")
         row = parse_judgment(source.read_text(encoding="utf-8-sig"), source.name)
         litigants = {(party["role"], party["name"]) for party in row["parties"] if party["role"] in {"原告", "被告", "第三人"}}
         self.assertIn(("原告", "王某"), litigants)

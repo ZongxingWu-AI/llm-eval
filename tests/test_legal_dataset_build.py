@@ -5,10 +5,16 @@
 失败表示待审题可能错误进入 release，或分类和 split 约束被破坏。"""
 
 import importlib
+import json
+import tempfile
 import unittest
+from pathlib import Path
+
+from core.data_io import read_jsonl, write_jsonl
 
 _build_module = importlib.import_module("methodology.02_构建题集.legal.dataset.build")
 build = _build_module.build
+run = _build_module.run
 
 
 class DatasetBuildTests(unittest.TestCase):
@@ -37,6 +43,34 @@ class DatasetBuildTests(unittest.TestCase):
             "source_evidence": [{"source_section": "judgment", "source_quote": "卢某付款"}],
             "review_status": "approved",
         }
+
+    def test_run_writes_release_manifest_and_metadata(self):
+        """测试目标：验证正式构建的运行级产物都记录了实际路径和数量。
+        准备数据：写入一条 approved 候选题到临时 drafts。
+        调用函数：调用 dataset.build.run 并显式指定三个输出路径。
+        预期结果：release、rejected、manifest 和相邻 metadata 均生成。
+        该断言保护的行为：不同批次可独立运行，且每次构建可追溯。
+        """
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            input_path = root / "drafts" / "legal_questions_draft.jsonl"
+            output_path = root / "releases" / "legal_questions_release_v1.jsonl"
+            manifest_path = root / "manifests" / "legal_release_manifest_v1.json"
+            write_jsonl(input_path, [self._draft("case_1", "问题")])
+
+            questions = run(input_path, output_path, manifest_path)
+
+            self.assertEqual(len(questions), 1)
+            self.assertEqual(len(read_jsonl(output_path)), 1)
+            self.assertTrue(output_path.with_suffix(output_path.suffix + ".rejected.jsonl").is_file())
+            self.assertTrue(manifest_path.is_file())
+            metadata_path = output_path.with_suffix(output_path.suffix + ".metadata.json")
+            self.assertTrue(metadata_path.is_file())
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            self.assertEqual(metadata["track"], "legal_benchmark.dataset_build")
+            self.assertEqual(metadata["questions"], 1)
+            self.assertEqual(metadata["cases"], 1)
 
     def test_build_keeps_all_questions_from_one_case_in_one_split(self):
         """测试目标：验证同一 case_id 的多道题始终进入同一 split。

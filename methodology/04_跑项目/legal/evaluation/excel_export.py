@@ -1,7 +1,7 @@
 """法律评测结果导出模块。
 
 项目位置：法律 Benchmark 的“跑项目”环节，作为法律评测入口的本地辅助模块。
-输入：法律评测生成的 legal_results.jsonl 或其他逐行 JSON 结果文件。
+输入：法律评测生成的 legal_evaluation_results.jsonl 或其他逐行 JSON 结果文件。
 输出：指定位置的 Excel 工作簿；每一行 JSON 对象对应表格中的一行。
 上下游：上游是 evaluation/run.py 写出的 JSONL，下游是人工筛选、复盘和汇报。
 副作用：读取 JSONL、创建父目录并覆盖同名 xlsx；不调用模型，也不访问外部项目。

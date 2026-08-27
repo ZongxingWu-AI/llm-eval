@@ -1,8 +1,8 @@
 """法律正式题集验证模块。
 
 项目位置：法律真实案例评测线的 validation 阶段。
-输入：releases/legal_questions.jsonl，以及可选的 cleaned 结构化案件。
-输出：validation_report.jsonl 和 Markdown 摘要，逐题记录 valid 与 issues。
+输入：命令行指定的正式题集 JSONL，以及 extract 阶段结构化案件。
+输出：legal_questions_validation_v1.jsonl、Markdown 摘要和相邻 metadata，逐题记录 valid 与 issues。
 上下游：上游是 dataset.build，下游是冻结题集后的 evaluation.run。
 副作用：覆盖验证报告；默认只做规则校验，传入 --use-llm 时才调用裁判模型。"""
 
@@ -16,9 +16,10 @@ from pathlib import Path
 from core import llm_client
 
 from core.data_io import read_jsonl, write_jsonl
+from core.run_metadata import new_run_metadata
 from core.json_utils import parse_json_object
 from core.prompt_loader import load_template, render
-from core.project_paths import LEGAL_DATA_ROOT as DATA_ROOT, LEGAL_PROMPT_ROOT as PROMPT_ROOT
+from core.project_paths import LEGAL_PROMPT_ROOT as PROMPT_ROOT
 _taxonomy = importlib.import_module("methodology.01_造Benchmark.legal.taxonomy")
 allowed_values = _taxonomy.allowed_values
 validate_cause_path = _taxonomy.validate_cause_path
@@ -130,19 +131,19 @@ def validate(questions: list[dict], cases: list[dict] | None = None) -> list[dic
     return findings
 
 
-def run(input_path: str | Path = DATA_ROOT / "releases" / "legal_questions.jsonl",
-        cases_path: str | Path = DATA_ROOT / "cleaned" / "structured_cases.jsonl",
-        output_path: str | Path = DATA_ROOT / "manifests" / "validation_report.jsonl",
+def run(input_path: str | Path, cases_path: str | Path,
+        output_path: str | Path,
         max_items: int | None = None, use_llm: bool = False) -> list[dict]:
     """用途：读取正式题集和可选案件，执行规则验证，并可用模型对通过项做补充复核。
 
     输入：input_path、cases_path、output_path、max_items、use_llm 控制验证范围和方式。
-    输出：返回验证记录列表；写 validation_report.jsonl 和同目录 Markdown 摘要。
+    输出：返回验证记录列表；写指定 JSONL、同目录 Markdown 摘要和相邻 metadata。
     运行前数据形态：运行前是一行一道正式题。
     运行后数据变化：运行后每行标记 valid 与问题列表，报告汇总通过和失败数量。
     副作用：读取 JSONL、创建目录并覆盖报告；仅 use_llm=True 时读取 JUDGE 配置并调用模型。
     异常或失败处理：模型复核失败会记录到该题 issues；文件或配置错误按调用方异常策略处理。"""
 
+    model = ""
     questions = read_jsonl(input_path)
     if max_items is not None and max_items > 0:
         questions = questions[:max_items]
@@ -181,14 +182,29 @@ def run(input_path: str | Path = DATA_ROOT / "releases" / "legal_questions.jsonl
     ]
     for item in findings:
         report.append(f"- [{item['status'].upper()}] {item['question_id'] or item['case_id']}：{'；'.join(item['issues']) or '通过'}")
-    Path(output_path).with_suffix(".md").write_text("\n".join(report) + "\n", encoding="utf-8")
+    report_path = Path(output_path).with_suffix(".md")
+    report_path.write_text("\n".join(report) + "\n", encoding="utf-8")
+    metadata = new_run_metadata(
+        "legal_benchmark.validation",
+        input=str(input_path),
+        cases=str(cases_path),
+        output=str(output_path),
+        report=str(report_path),
+        questions=len(questions),
+        failures=failure_count,
+        method="rules+llm" if use_llm else "rules",
+        model=model,
+    )
+    Path(output_path).with_suffix(Path(output_path).suffix + ".metadata.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return findings
 
 
 def main() -> None:
     """用途：提供题集验证 CLI，并用退出码区分全部通过和存在失败项。
 
-    输入：参数来自 argparse；默认验证 releases/legal_questions.jsonl，可选 cleaned 案件和 --use-llm。
+    输入：参数来自 argparse；题集、extract 案件和校验输出路径均显式提供。
     输出：写出 JSONL/Markdown 报告；全部有效时退出 0，有任一无效题时退出 1。
     运行前数据形态：运行前是正式题集和命令行参数。
     运行后数据变化：运行后生成发布前质量报告，阻止无来源或跨 split 题进入评测。
@@ -196,9 +212,9 @@ def main() -> None:
     异常或失败处理：参数错误由 argparse 处理；运行异常或验证失败均产生非零退出。"""
 
     parser = argparse.ArgumentParser(description="校验法律题集、受控标签、来源定位和案件级 split")
-    parser.add_argument("--input", default=str(DATA_ROOT / "releases" / "legal_questions.jsonl"), help="正式题集 JSONL")
-    parser.add_argument("--cases", default=str(DATA_ROOT / "cleaned" / "structured_cases.jsonl"), help="结构化案件 JSONL")
-    parser.add_argument("--output", default=str(DATA_ROOT / "manifests" / "validation_report.jsonl"), help="校验结果 JSONL")
+    parser.add_argument("--input", required=True, help="正式题集 JSONL")
+    parser.add_argument("--cases", required=True, help="extract 阶段案件 JSONL")
+    parser.add_argument("--output", required=True, help="校验结果 JSONL")
     parser.add_argument("--max-items", type=int, default=None, help="只校验前 N 题")
     parser.add_argument("--llm-check", action="store_true", help="增加模型语义复核")
     args = parser.parse_args()
@@ -219,7 +235,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-
-

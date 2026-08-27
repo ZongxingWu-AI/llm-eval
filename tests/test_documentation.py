@@ -1,26 +1,22 @@
-"""法律项目中文注释与数据目录 README 规范测试。
-
-被测范围：core、methodology、tests 下的法律项目 Python 文件，以及法律数据、Prompt、Schema、Taxonomy、结果目录 README。
-风险：拆分后法律仓库仍出现空泛 docstring、旧外部项目描述或缺少字段说明。
-测试使用 AST 和文本读取，不导入业务模块、不调用真实模型、不写正式数据。
-失败通常意味着代码注释或学习文档没有随项目边界一起更新。
-"""
+"""法律项目中文注释、批次目录和文档契约测试。"""
 
 import ast
+import importlib
 import unittest
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+BATCH_ROOT = PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "data" / "datasets" / "legal_20260827_001"
 CODE_ROOTS = [PROJECT_ROOT / "core", PROJECT_ROOT / "methodology", PROJECT_ROOT / "tests"]
 README_DIRS = [
     PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "data",
-    PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "data" / "raw",
-    PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "data" / "raw_selected_50",
-    PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "data" / "parsed",
-    PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "data" / "cleaned",
-    PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "data" / "drafts",
-    PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "data" / "manifests",
-    PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "data" / "releases",
+    BATCH_ROOT,
+    BATCH_ROOT / "raw",
+    BATCH_ROOT / "clean",
+    BATCH_ROOT / "extract",
+    BATCH_ROOT / "manifests",
+    BATCH_ROOT / "drafts",
+    BATCH_ROOT / "releases",
     PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "prompts",
     PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "schemas",
     PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "taxonomy",
@@ -34,7 +30,7 @@ def has_chinese(text):
 
 
 class LegalDocumentationTests(unittest.TestCase):
-    """保护法律项目代码注释和数据目录说明。"""
+    """保护法律项目代码注释和批次数据目录说明。"""
 
     def test_python_files_have_chinese_module_and_function_docs(self):
         """测试目标：确认法律项目每个 Python 文件和函数都有中文 docstring。
@@ -61,10 +57,10 @@ class LegalDocumentationTests(unittest.TestCase):
     def test_legal_readmes_exist_and_describe_fields(self):
         """测试目标：确认法律数据链路各目录都有可阅读的 README。
 
-        准备数据：遍历 raw、parsed、cleaned、drafts、manifests、releases、Prompt、Schema、Taxonomy 和 results。
-        调用函数：读取每个目录 README 并检查关键中文字段。
+        准备数据：遍历批次 raw、clean、extract、manifests、drafts、releases 以及公共说明目录。
+        调用函数：读取每个目录 README 并检查关键字段。
         预期结果：README 存在、非空，且总说明中出现 full_text、source_quote、validation 和 case_id。
-        该断言保护的行为：原始数据和 JSONL 离开代码后仍能被人工解释。
+        该断言保护的行为：原始数据和 JSONL 离开代码后仍可被人工解释。
         """
         all_text = []
         for directory in README_DIRS:
@@ -77,6 +73,24 @@ class LegalDocumentationTests(unittest.TestCase):
         for field in ("full_text", "source_quote", "validation", "case_id"):
             self.assertIn(field, merged)
 
+    def test_readmes_document_batch_and_stage_naming(self):
+        """测试目标：确认文档描述按批次组织、按阶段命名且不编码案例数量。
+
+        准备数据：读取项目和当前批次的 README。
+        调用函数：检查批次目录、阶段目录、伴生文件和显式路径约定。
+        预期结果：文档包含 dataset_id、clean、extract、metadata 和 errors 等说明，不再依赖旧目录。
+        该断言保护的行为：新增数据集时可以复用同一套命令而不误写当前批次。
+        """
+        paths = [PROJECT_ROOT / "README.md", PROJECT_ROOT / "methodology" / "README.md", PROJECT_ROOT / "methodology" / "01_造Benchmark" / "README.md", PROJECT_ROOT / "methodology" / "01_造Benchmark" / "module_map.md", PROJECT_ROOT / "methodology" / "02_构建题集" / "module_map.md", PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "data" / "README.md", BATCH_ROOT / "README.md"]
+        paths.extend(directory / "README.md" for directory in README_DIRS if directory != PROJECT_ROOT / "methodology" / "01_造Benchmark" / "legal" / "data")
+        merged = "\n".join(path.read_text(encoding="utf-8") for path in paths if path.is_file())
+        for phrase in ("data/datasets/<dataset_id>", "raw", "clean", "extract", "drafts", "releases", "legal_cases_clean.jsonl", "legal_cases_extract.jsonl", ".metadata.json", ".errors.jsonl", "case_id", "source.sha256"):
+            self.assertIn(phrase, merged)
+        self.assertNotIn("raw_selected_50", merged)
+        self.assertNotIn("legal_cases_parsed_selected_50", merged)
+        self.assertNotIn("legal_cases_extracted_selected_50", merged)
+        self.assertNotIn("cleaned/", merged)
+
     def test_legal_source_has_no_external_business_dependency(self):
         """测试目标：确认法律项目生产代码不导入外部 C-Eval/LLM-as-Judge 业务包。
 
@@ -85,10 +99,7 @@ class LegalDocumentationTests(unittest.TestCase):
         预期结果：法律源码不出现旧 ceval/pairwise 业务依赖或外部项目路径。
         该断言保护的行为：法律项目可以在没有外部项目目录时独立运行。
         """
-        forbidden = (
-            "methodology.01_造Benchmark.ceval", "methodology.03_当裁判.pairwise",
-            "CEVAL_", "PAIRWISE_", "C:\\CEval-LLMJudge",
-        )
+        forbidden = ("methodology.01_造Benchmark.ceval", "methodology.03_当裁判.pairwise", "CEVAL_", "PAIRWISE_", "C:\\CEval-LLMJudge")
         for root in (PROJECT_ROOT / "core", PROJECT_ROOT / "methodology"):
             for path in root.rglob("*.py"):
                 text = path.read_text(encoding="utf-8")

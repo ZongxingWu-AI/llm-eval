@@ -27,11 +27,11 @@
 
 | 指标 | 简历写法 | 数据来源 |
 |---|---|---|
-| 正式题集规模 | 完成 `X` 道法律评测题 | `data/releases/legal_questions.jsonl` 行数 |
+| 正式题集规模 | 完成 `X` 道法律评测题 | `data/releases/legal_questions_release_v1.jsonl` 行数 |
 | 案件覆盖 | 覆盖 `X` 个案件、`X` 类纠纷 | release 文件和 Manifest |
-| 模型调用规模 | 完成 `X` 次模型调用 | `legal_results.jsonl` 行数 |
-| 运行稳定性 | 调用成功率 `X%`，错误率 `X%` | 结果文件与 `errors.jsonl` |
-| 评分分布 | `PASS / REVIEW / REJECT = X / X / X` | `legal_results.jsonl` |
+| 模型调用规模 | 完成 `X` 次模型调用 | `legal_evaluation_results.jsonl` 行数 |
+| 运行稳定性 | 调用成功率 `X%`，错误率 `X%` | 结果文件与 `legal_evaluation_errors.jsonl` |
+| 评分分布 | `PASS / REVIEW / REJECT = X / X / X` | `legal_evaluation_results.jsonl` |
 | 运行效率 | 平均单题延迟 `X` 秒、平均 Token `X` | 结果中的 `latency_seconds` 和 `tokens` |
 | 评分可靠性 | 与人工评分一致率 `X%` 或 Cohen’s Kappa=`X` | Calibration 人工复核表 |
 | 任务覆盖 | 覆盖 `X` 类任务、`X` 种推理能力 | 题集 Taxonomy 统计 |
@@ -52,7 +52,7 @@
 
 ### 2. 数据设计
 
-从真实判决书中保留案件全文、案件主体、裁判理由、判决主文和来源位置，构建 `raw → parsed → cleaned` 的数据生命周期；题目中的参考答案和 Rubric 通过来源章节、原文证据进行追溯，避免生成脱离上下文的问答对。
+从真实判决书中保留案件全文、案件主体、裁判理由、判决主文和来源位置，构建 `raw → clean → extract` 的数据生命周期；题目中的参考答案和 Rubric 通过来源章节、原文证据进行追溯，避免生成脱离上下文的问答对。
 
 ### 3. 题集设计
 
@@ -84,7 +84,7 @@
 - `PASS / REVIEW / REJECT` 三档评分逻辑；
 - 运行结果、错误记录、报告、运行元数据和可选 Excel 导出的输出设计。
 
-当前已落盘的 `parsed` 和 `cleaned` 数据各为 50 条；`drafts`、`releases` 和 `results` 目录目前主要是说明文件。因此在完成候选题审核、正式题集发布和模型批量评测之前，不应在简历上声称已经获得模型准确率、评分一致率或完整评测结果。
+当前已落盘的 `clean` 和 `extract` 数据各为 50 条；`drafts`、`releases` 和 `results` 目录目前主要是说明文件。因此在完成候选题审核、正式题集发布和模型批量评测之前，不应在简历上声称已经获得模型准确率、评分一致率或完整评测结果。
 
 ## 六、不要写成的表述
 
@@ -108,7 +108,7 @@
 - [ ] 正式题集文件和 release Manifest 已生成；
 - [ ] `dev / calibration / test` 的题量和案件数已统计；
 - [ ] 至少一次完整模型评测运行目录已保存；
-- [ ] `legal_results.jsonl`、`errors.jsonl`、`legal_report.md` 和 `run_metadata.json` 已生成；
+- [ ] `legal_evaluation_results.jsonl`、`legal_evaluation_errors.jsonl`、`legal_evaluation_report.md` 和 `run_metadata.json` 已生成；
 - [ ] 至少完成一轮人工 Calibration 或评分器抽样复核；
 - [ ] 成功率、错误率、`PASS / REVIEW / REJECT` 分布、平均延迟和 Token 统计均来自真实运行文件；
 - [ ] 简历中的每一条“设计并实现”都能对应到具体模块、输入输出、异常处理和设计取舍。

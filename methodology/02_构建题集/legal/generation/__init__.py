@@ -1,4 +1,3 @@
-"""法律候选题生成包入口。
+# 法律 generation 包
 
-对外标识 cleaned 案件到 pending drafts 的模型出题阶段。
-具体流程位于 generate.py；包初始化不读取环境变量、不调用模型。"""
+本包从 extract 案件生成待人工审核的 drafts 候选题。具体批次输入和输出路径由命令行指定。

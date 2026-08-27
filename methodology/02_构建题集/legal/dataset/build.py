@@ -1,8 +1,8 @@
 """法律正式题集组装模块。
 
 项目位置：法律真实案例评测线的 dataset 构建阶段。
-输入：drafts/candidate_questions.jsonl 中经过人工审核的候选题。
-输出：releases/legal_questions.jsonl、拒绝记录和 release_manifest.json。
+输入：命令行指定的 drafts JSONL 中经过人工审核的候选题。
+输出：releases/legal_questions_release_v1.jsonl、拒绝记录、legal_release_manifest_v1.json 和相邻 metadata。
 上下游：上游是出题与人工审稿，下游是 validation.validate 和 evaluation.run。
 副作用：覆盖指定 release、rejected 和 manifest 文件；不调用模型，不接触 raw 原文。"""
 
@@ -16,8 +16,8 @@ from datetime import date
 from pathlib import Path
 
 from core.data_io import read_jsonl, write_jsonl
+from core.run_metadata import new_run_metadata
 from .split import assign_case_splits
-from core.project_paths import LEGAL_DATA_ROOT as DATA_ROOT
 _taxonomy = importlib.import_module("methodology.01_造Benchmark.legal.taxonomy")
 allowed_values = _taxonomy.allowed_values
 load_taxonomy = _taxonomy.load_taxonomy
@@ -160,17 +160,15 @@ def build(drafts: list[dict], include_pending: bool = False, max_items: int | No
     return assign_case_splits(accepted), rejected
 
 
-def run(input_path: str | Path = DATA_ROOT / "drafts" / "candidate_questions.jsonl",
-        output_path: str | Path = DATA_ROOT / "releases" / "legal_questions.jsonl",
-        manifest_path: str | Path = DATA_ROOT / "manifests" / "release_manifest.json",
+def run(input_path: str | Path, output_path: str | Path, manifest_path: str | Path,
         max_items: int | None = None, include_pending: bool = False) -> list[dict]:
     """用途：从 drafts JSONL 组装正式 release，并写拒绝记录和发布清单。
 
     输入：input_path、output_path、manifest_output、max_items、include_pending 控制本次构建。
-    输出：返回正式题目列表；写 legal_questions.jsonl、rejected JSONL 和 release_manifest.json。
+    输出：返回正式题目列表；写指定 release、rejected JSONL、发布清单和相邻 metadata。
     运行前数据形态：运行前是一行一道候选题。
     运行后数据变化：运行后通过项进入 release，拒绝项单独留痕，manifest 汇总版本、哈希、split 和分类数量。
-    副作用：读取候选题，创建父目录并覆盖发布文件；不调用模型、不修改 raw 或 cleaned 数据。
+    副作用：读取候选题，创建父目录并覆盖发布文件；不调用模型、不修改 raw 或 extract 数据。
     异常或失败处理：输入不存在或写入失败时抛出；单题质量问题进入 rejected 文件。"""
 
     drafts = read_jsonl(input_path)
@@ -208,6 +206,21 @@ def run(input_path: str | Path = DATA_ROOT / "drafts" / "candidate_questions.jso
     target_manifest = Path(manifest_path)
     target_manifest.parent.mkdir(parents=True, exist_ok=True)
     target_manifest.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    metadata = new_run_metadata(
+        "legal_benchmark.dataset_build",
+        input=str(input_path),
+        output=str(output_path),
+        manifest_output=str(manifest_path),
+        rejected_output=str(rejected_path),
+        questions=len(questions),
+        cases=len(case_ids),
+        rejected=len(rejected),
+        method="rules",
+        model="",
+    )
+    output.with_suffix(output.suffix + ".metadata.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return questions
 
 
@@ -222,9 +235,9 @@ def main() -> None:
     异常或失败处理：参数错误由 argparse 处理；run 异常转换为非零退出。"""
 
     parser = argparse.ArgumentParser(description="组装经人工审核的法律正式题集")
-    parser.add_argument("--input", default=str(DATA_ROOT / "drafts" / "candidate_questions.jsonl"), help="候选题 JSONL")
-    parser.add_argument("--output", default=str(DATA_ROOT / "releases" / "legal_questions.jsonl"), help="正式题集 JSONL")
-    parser.add_argument("--manifest-output", default=str(DATA_ROOT / "manifests" / "release_manifest.json"), help="发布清单 JSON")
+    parser.add_argument("--input", required=True, help="候选题 JSONL")
+    parser.add_argument("--output", required=True, help="正式题集 JSONL")
+    parser.add_argument("--manifest-output", required=True, help="发布清单 JSON")
     parser.add_argument("--max-items", type=int, default=None, help="最多组装前 N 道通过项")
     parser.add_argument("--include-pending", action="store_true", help="仅用于开发试跑；正式发布不要使用")
     args = parser.parse_args()
@@ -238,8 +251,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-
-
-

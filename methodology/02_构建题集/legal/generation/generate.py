@@ -1,8 +1,8 @@
 """法律候选题生成模块。
 
 项目位置：法律真实案例评测线的 generation 阶段。
-输入：cleaned/structured_cases.jsonl 中已解析并带来源定位的案件。
-输出：drafts/candidate_questions.jsonl、错误 JSONL 和运行元数据；新题默认 review_status=pending。
+输入：extract 阶段中已解析并带来源定位的案件 JSONL。
+输出：命令行指定的 drafts JSONL、错误 JSONL 和运行元数据；新题默认 review_status=pending。
 上下游：上游是结构化提取，下游是人工审稿和 dataset.build。
 副作用：读取 GENERATOR 模型配置并调用模型，覆盖指定 drafts 输出；不修改案件原文。"""
 
@@ -17,7 +17,7 @@ from core.data_io import read_jsonl, write_jsonl
 from core.json_utils import parse_json_value
 from core.prompt_loader import load_template, render
 from core.run_metadata import new_run_metadata
-from core.project_paths import LEGAL_DATA_ROOT as DATA_ROOT, LEGAL_PROMPT_ROOT as PROMPT_ROOT
+from core.project_paths import LEGAL_PROMPT_ROOT as PROMPT_ROOT
 # Taxonomy 属于“造 Benchmark”环节；目录名含中文和数字，使用字符串导入。
 _taxonomy = importlib.import_module("methodology.01_造Benchmark.legal.taxonomy")
 load_taxonomy = _taxonomy.load_taxonomy
@@ -55,7 +55,7 @@ def _valid_evidence(case: dict, evidence) -> list[dict]:
 def generate_one_case(case: dict, client, model: str, questions_per_case: int) -> tuple[list[dict], list[str]]:
     """用途：调用 GENERATOR 模型为单个真实案件生成待人工审核的候选问题。
 
-    输入：case 是 cleaned 案件；client/model 是模型配置；questions_per_case 是期望数量。
+    输入：case 是 extract 案件；client/model 是模型配置；questions_per_case 是期望数量。
     输出：返回 (有效候选题列表, 错误消息列表)，候选题统一带 case_id、case_classification 和 review_status=pending。
     运行前数据形态：运行前是一条含 sections 与 legal_extraction 的案件。
     运行后数据变化：运行后得到可追溯但尚未获准发布的 pending 候选题。
@@ -92,14 +92,13 @@ def generate_one_case(case: dict, client, model: str, questions_per_case: int) -
     return results, errors
 
 
-def run(input_path: str | Path = DATA_ROOT / "cleaned" / "structured_cases.jsonl",
-        output_path: str | Path = DATA_ROOT / "drafts" / "candidate_questions.jsonl",
+def run(input_path: str | Path, output_path: str | Path,
         max_items: int | None = None, case_ids: set[str] | None = None, questions_per_case: int = 2) -> list[dict]:
-    """用途：批量调用出题模型，把 cleaned 案件转换为候选题、错误记录和运行元数据。
+    """用途：批量调用出题模型，把 extract 案件转换为候选题、错误记录和运行元数据。
 
     输入：input_path、output_path、max_items、case_ids、questions_per_case 控制本次任务。
-    输出：返回候选题列表；写 candidate_questions.jsonl、.errors.jsonl 和 .metadata.json。
-    运行前数据形态：运行前每行是一条 cleaned 案件。
+    输出：返回候选题列表；写指定 drafts JSONL、.errors.jsonl 和 .metadata.json。
+    运行前数据形态：运行前每行是一条 extract 案件。
     运行后数据变化：运行后每道合格题成为 JSONL 一行，状态仍为 pending，不能直接作为 release。
     副作用：读取环境变量并调用 GENERATOR 模型，创建目录并覆盖三个输出文件。
     异常或失败处理：单案异常写入错误文件后继续其他案件；模型配置缺失或全局文件错误会抛出。"""
@@ -148,8 +147,8 @@ def main() -> None:
     异常或失败处理：参数错误由 argparse 处理；run 异常转换为非零退出。"""
 
     parser = argparse.ArgumentParser(description="基于真实案例生成法律候选题")
-    parser.add_argument("--input", default=str(DATA_ROOT / "cleaned" / "structured_cases.jsonl"), help="结构化案件 JSONL")
-    parser.add_argument("--output", default=str(DATA_ROOT / "drafts" / "candidate_questions.jsonl"), help="候选题 JSONL")
+    parser.add_argument("--input", required=True, help="extract 阶段案件 JSONL")
+    parser.add_argument("--output", required=True, help="候选题 JSONL")
     parser.add_argument("--max-items", "--max-cases", type=int, default=None, help="只处理前 N 案")
     parser.add_argument("--cases", default="", help="只处理指定 case_id，逗号分隔")
     parser.add_argument("--questions-per-case", type=int, default=2, help="每案候选题数量")
@@ -170,8 +169,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-
-
-

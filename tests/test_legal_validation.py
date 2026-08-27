@@ -5,11 +5,17 @@
 失败表示不可追溯引用或数据泄漏可能未被发布前检查发现。"""
 
 import importlib
+import json
+import tempfile
 import unittest
+from pathlib import Path
+
+from core.data_io import read_jsonl, write_jsonl
 
 _validation = importlib.import_module("methodology.02_构建题集.legal.validation.validate")
 check_row = _validation.check_row
 validate = _validation.validate
+run = _validation.run
 
 class LegalValidationTests(unittest.TestCase):
 
@@ -37,6 +43,35 @@ class LegalValidationTests(unittest.TestCase):
             },
         }
         self.case = {"case_id": "case_1", "sections": {"judgment": "判决如下：卢某支付货款。"}}
+
+    def test_run_writes_validation_report_and_metadata(self):
+        """测试目标：验证验证阶段写出 JSONL、Markdown 和相邻 metadata。
+        准备数据：写入一条合法正式题和对应 extract 案件到临时目录。
+        调用函数：调用 validation.run 并显式指定输入、案件和输出路径。
+        预期结果：校验结果通过，报告与 metadata 记录真实运行信息。
+        该断言保护的行为：验证阶段独立于具体批次，并保留运行级可追踪信息。
+        """
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            input_path = root / "releases" / "legal_questions_release_v1.jsonl"
+            cases_path = root / "extract" / "legal_cases_extract.jsonl"
+            output_path = root / "validation" / "legal_questions_validation_v1.jsonl"
+            write_jsonl(input_path, [self.row])
+            write_jsonl(cases_path, [self.case])
+
+            findings = run(input_path, cases_path, output_path)
+
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0]["status"], "pass")
+            self.assertEqual(read_jsonl(output_path)[0]["status"], "pass")
+            self.assertTrue(output_path.with_suffix(".md").is_file())
+            metadata_path = output_path.with_suffix(output_path.suffix + ".metadata.json")
+            self.assertTrue(metadata_path.is_file())
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            self.assertEqual(metadata["track"], "legal_benchmark.validation")
+            self.assertEqual(metadata["questions"], 1)
+            self.assertEqual(metadata["failures"], 0)
 
     def test_source_quote_must_exist_in_named_section(self):
         """测试目标：验证证据短引必须出现在声明的案件章节中。

@@ -3,7 +3,7 @@
 项目位置：法律真实案例评测线的 scoring 层。
 输入：正式题目、被测模型回答，以及 rubric_judge 场景下的裁判客户端。
 输出：统一包含 verdict 和 reason 的评分字典，并附规则命中或裁判元数据。
-上下游：由 evaluation.run 逐题调用，结果写入 legal_results.jsonl。
+上下游：由 evaluation.run 逐题调用，结果写入 legal_evaluation_results.jsonl。
 副作用：规则和红线评分不写文件；仅 rubric_judge 路径调用裁判模型。"""
 
 import json
@@ -238,5 +238,3 @@ def score_one(
     if method == "rubric_judge":
         return score_by_judge(row, answer, client, model or "")
     return {"verdict": "REJECT", "reason": f"未知 scoring_method：{method}"}
-
-

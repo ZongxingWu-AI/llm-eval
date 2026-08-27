@@ -1,8 +1,8 @@
 """法律判决书无损解析模块。
 
 项目位置：法律真实案例评测线的 ingestion 阶段。
-输入：methodology/01_造Benchmark/legal/data/raw/ 或 raw_selected_50/ 中一案一文件的 Markdown 或文本判决书。
-输出：parsed_judgments.jsonl 和 raw_manifest.jsonl；每案保留 full_text、章节、当事人、分类、哈希和质量状态。
+输入：命令行指定的批次 raw/ 目录中一案一文件的 Markdown 或文本判决书。
+输出：命令行指定的 clean JSONL、来源 manifest 和相邻 metadata；每案保留 full_text、章节、当事人、分类、哈希和质量状态。
 上下游：上游是人工收集的原始案例，下游是 extraction.extract 的法律信息提取。
 副作用：读取本地原始文件并覆盖指定 JSONL 输出；不调用大模型，也不修改 raw 文件。"""
 
@@ -17,12 +17,9 @@ from pathlib import Path
 from typing import Iterable
 
 from core.data_io import write_jsonl
-from core.project_paths import LEGAL_DATA_ROOT as DATA_ROOT
+from core.run_metadata import new_run_metadata
 
 PARSER_VERSION = "legal-parser-v3"
-DEFAULT_RAW_DIR = DATA_ROOT / "raw_selected_50"
-DEFAULT_PARSED_OUTPUT = DATA_ROOT / "parsed" / "parsed_judgments_selected_50.jsonl"
-DEFAULT_MANIFEST_OUTPUT = DATA_ROOT / "manifests" / "raw_selected_50_manifest.jsonl"
 ROLE_LABELS = ("原告", "被告", "第三人", "申请人", "被申请人", "上诉人", "被上诉人", "委托诉讼代理人", "诉讼代理人", "法定代表人")
 SECTION_MARKERS = {
     "claims": ("诉讼请求", "请求事项"),
@@ -56,6 +53,19 @@ def list_raw_files(raw_dir: str | Path) -> list[Path]:
             continue
         files.append(path)
     return sorted(files)
+
+
+def sha256_bytes(content: bytes) -> str:
+    """用途：计算原始判决书字节内容的 SHA-256。
+
+    输入：content 是原始文件的完整 UTF-8/UTF-8-SIG 字节。
+    输出：返回 64 位十六进制哈希字符串。
+    运行前数据形态：输入是文件尚未解码的原始字节。
+    运行后数据变化：哈希写入 source.sha256，并参与生成 case_id。
+    副作用：只在内存中计算，不写文件、不调用模型。
+    异常或失败处理：空字节也会得到确定哈希。"""
+
+    return hashlib.sha256(content).hexdigest()
 
 
 def sha256_text(text: str) -> str:
@@ -500,15 +510,15 @@ def parse_judgment(text: str, source_file: str = "") -> dict:
     }
 
 
-def clean_directory(raw_dir: str | Path = DEFAULT_RAW_DIR, output_path: str | Path = DEFAULT_PARSED_OUTPUT,
-                    max_items: int | None = None, manifest_output: str | Path | None = None) -> list[dict]:
+def clean_directory(raw_dir: str | Path, output_path: str | Path,
+                    max_items: int | None = None, *, manifest_output: str | Path) -> list[dict]:
     """用途：批量读取 raw 判决书，调用 parse_judgment，并写出解析结果与本地来源清单。
 
-    输入：raw_dir 是原始目录；output_path 是 parsed JSONL；max_items 限制试跑数量；manifest_output 指定清单路径。
-    输出：返回解析案件列表；同时生成一案一行的 parsed JSONL 和 raw_manifest.jsonl。
+    输入：raw_dir 是原始目录；output_path 是 clean JSONL；max_items 限制试跑数量；manifest_output 指定清单路径。
+    输出：返回解析案件列表；同时生成命令行指定的 clean JSONL 和来源 manifest。
     运行前数据形态：运行前 raw 下是一案一文件。
     运行后数据变化：运行后每案成为结构化 JSON 行，manifest 记录 case_id、文件名、哈希和审核状态。
-    副作用：读取原始文件，创建父目录并覆盖两个 JSONL 输出；不调用模型、不修改 raw 文件。
+    副作用：读取原始文件，创建父目录并覆盖两个 JSONL 输出及相邻 metadata；不调用模型、不修改 raw 文件。
     异常或失败处理：目录不存在时写出空 JSONL；单个文件解码或写入失败会抛出异常，交给 CLI 报错。
     最小示例：同名文件正文变化后哈希和 case_id 会变化，因此会被重新处理。"""
 
@@ -517,14 +527,18 @@ def clean_directory(raw_dir: str | Path = DEFAULT_RAW_DIR, output_path: str | Pa
         files = files[:max_items]
     rows: list[dict] = []
     for path in files:
-        text = path.read_text(encoding="utf-8-sig")
-        rows.append(parse_judgment(text, path.name))
+        raw_bytes = path.read_bytes()
+        text = raw_bytes.decode("utf-8-sig")
+        row = parse_judgment(text, path.name)
+        digest = sha256_bytes(raw_bytes)
+        row["case_id"] = "case_" + digest[:12]
+        row["source"]["sha256"] = digest
+        rows.append(row)
     write_jsonl(output_path, rows)
 
-    if manifest_output:
-        manifest_path = Path(manifest_output)
-    else:
-        manifest_path = DEFAULT_MANIFEST_OUTPUT
+    if not manifest_output:
+        raise ValueError("manifest_output 必须显式指定")
+    manifest_path = Path(manifest_output)
     manifests: list[dict] = []
     for row in rows:
         source = row["source"]
@@ -539,33 +553,42 @@ def clean_directory(raw_dir: str | Path = DEFAULT_RAW_DIR, output_path: str | Pa
             "review_status": quality["review_status"],
         })
     write_jsonl(manifest_path, manifests)
+    target = Path(output_path)
+    metadata = new_run_metadata(
+        "legal_benchmark.ingestion",
+        input=str(Path(raw_dir)),
+        output=str(target),
+        manifest_output=str(manifest_path),
+        count=len(rows),
+        method="rules",
+        parser_version=PARSER_VERSION,
+    )
+    target.with_suffix(target.suffix + ".metadata.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return rows
 
 
 def main() -> None:
     """用途：提供法律清洗命令行入口，把 --raw-dir、--output、--manifest-output 和 --max-items 传给 clean_directory。
 
-    输入：参数来自 argparse；默认读取法律线 raw 并写入 parsed 与 manifests。
+    输入：参数来自 argparse；raw、clean 和 manifest 路径均由命令行显式提供。
     输出：成功时打印处理数量并正常退出；业务结果保存在指定 JSONL 文件。
     运行前数据形态：运行前命令行只有路径和数量参数。
-    运行后数据变化：运行后生成 parsed 案件文件和来源 manifest。
+    运行后数据变化：运行后生成 clean 案件文件和来源 manifest。
     副作用：读取本地判决书，创建目录并覆盖输出文件；不调用模型、不修改 raw。
     异常或失败处理：参数解析错误由 argparse 退出；文件处理异常向上抛出并产生非零退出码。"""
 
     parser = argparse.ArgumentParser(description="无损解析本地民事判决书")
-    parser.add_argument("--raw-dir", "--input", default=str(DEFAULT_RAW_DIR), help="原始判决书目录")
-    parser.add_argument("--output", default=str(DEFAULT_PARSED_OUTPUT), help="解析结果 JSONL")
-    parser.add_argument("--manifest-output", default=str(DEFAULT_MANIFEST_OUTPUT), help="本地来源清单 JSONL")
+    parser.add_argument("--raw-dir", "--input", required=True, help="原始判决书目录")
+    parser.add_argument("--output", required=True, help="clean 阶段案件 JSONL")
+    parser.add_argument("--manifest-output", required=True, help="来源清单 JSONL")
     parser.add_argument("--max-items", "--max-cases", type=int, default=None, help="只处理前 N 份")
     args = parser.parse_args()
-    rows = clean_directory(args.raw_dir, args.output, args.max_items, args.manifest_output)
+    rows = clean_directory(args.raw_dir, args.output, args.max_items, manifest_output=args.manifest_output)
     print(f"完成：{args.output}，共 {len(rows)} 份；manifest：{args.manifest_output}")
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
 

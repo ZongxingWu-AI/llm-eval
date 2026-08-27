@@ -31,12 +31,12 @@ class LegalManifestTests(unittest.TestCase):
             raw = root / "raw"
             raw.mkdir()
             source = raw / "same.md"
-            parsed = root / "parsed.jsonl"
+            clean = root / "clean.jsonl"
             manifest = root / "manifest.jsonl"
             source.write_text(DOCUMENT_TEMPLATE.format(amount=100), encoding="utf-8")
-            first = clean_directory(raw, parsed, manifest_output=manifest)[0]
+            first = clean_directory(raw, clean, manifest_output=manifest)[0]
             source.write_text(DOCUMENT_TEMPLATE.format(amount=200), encoding="utf-8")
-            second = clean_directory(raw, parsed, manifest_output=manifest)[0]
+            second = clean_directory(raw, clean, manifest_output=manifest)[0]
             self.assertNotEqual(first["source"]["sha256"], second["source"]["sha256"])
             self.assertNotEqual(first["case_id"], second["case_id"])
             rows = read_jsonl(manifest)

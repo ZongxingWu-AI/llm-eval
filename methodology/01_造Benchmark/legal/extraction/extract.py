@@ -1,10 +1,10 @@
 """法律结构化信息提取模块。
 
 项目位置：法律真实案例评测线的 extraction 阶段。
-输入：ingestion 生成的 parsed_judgments.jsonl，其中包含完整原文和章节。
-输出：structured_cases.jsonl，每案新增可回溯的 legal_extraction；同时写运行元数据。
+输入：命令行指定的 clean 阶段案件 JSONL，其中包含完整原文和章节。
+输出：命令行指定的 extract 阶段案件 JSONL，每案新增可回溯的 legal_extraction；同时写运行元数据。
 上下游：上游是无损解析，下游是 generation.generate 的候选题生成。
-副作用：覆盖指定 cleaned JSONL；默认只用规则，传入 --use-llm 时才调用 EXTRACTOR 模型。"""
+副作用：覆盖指定 extract JSONL；默认只用规则，传入 --use-llm 时才调用 EXTRACTOR 模型。"""
 import argparse
 import json
 import re
@@ -16,10 +16,9 @@ from core.data_io import read_jsonl, write_jsonl
 from core.json_utils import parse_json_object
 from core.prompt_loader import load_template, render
 from core.run_metadata import new_run_metadata
-from core.project_paths import LEGAL_DATA_ROOT as DATA_ROOT, LEGAL_PROMPT_ROOT as PROMPT_ROOT
+from core.project_paths import LEGAL_PROMPT_ROOT as PROMPT_ROOT
 
 EXTRACTOR_VERSION = "legal-extractor-v1"
-DEFAULT_PARSED_INPUT = DATA_ROOT / "parsed" / "parsed_judgments_selected_50.jsonl"
 
 
 def _sentences(text: str) -> list[str]:
@@ -120,9 +119,9 @@ def _valid_grounded_items(items, sections: dict) -> list[dict]:
 
 
 def extract_case(case: dict, client=None, model: str = "") -> dict:
-    """用途：为单个 parsed 案件生成 legal_extraction，并在启用客户端时融合有来源的大模型结果。
+    """用途：为单个 clean 案件生成 legal_extraction，并在启用客户端时融合有来源的大模型结果。
 
-    输入：case 是 parsed 案件；client/model 为空时只走规则路径。
+    输入：case 是 clean 案件；client/model 为空时只走规则路径。
     输出：返回案件浅拷贝，并新增 legal_extraction 和 extractor_version。
     运行前数据形态：运行前包含 sections、classification 等解析字段。
     运行后数据变化：运行后增加争议焦点、证据判断和法院结论，原 full_text 与 sections 不变。
@@ -166,14 +165,13 @@ def extract_case(case: dict, client=None, model: str = "") -> dict:
     return result
 
 
-def run(input_path: str | Path = DEFAULT_PARSED_INPUT,
-        output_path: str | Path = DATA_ROOT / "cleaned" / "structured_cases.jsonl",
+def run(input_path: str | Path, output_path: str | Path,
         max_items: int | None = None, use_llm: bool = False) -> list[dict]:
-    """用途：批量读取 parsed JSONL，执行结构化法律提取并写入 cleaned JSONL 和运行元数据。
+    """用途：批量读取 clean JSONL，执行结构化法律提取并写入 extract JSONL 和运行元数据。
 
     输入：input_path、output_path、max_items 控制数据；use_llm 决定是否配置 EXTRACTOR 模型。
-    输出：返回清洗后案件列表，并写 structured_cases.jsonl 及相邻 metadata.json。
-    运行前数据形态：运行前每行是 parsed 案件。
+    输出：返回结构化案件列表，并写命令行指定的 extract JSONL 及相邻 metadata.json。
+    运行前数据形态：运行前每行是 clean 案件。
     运行后数据变化：运行后每行新增 legal_extraction，元数据记录数量、模型和路径。
     副作用：读取 JSONL、创建目录并覆盖输出；仅 use_llm=True 时读取环境变量并调用模型。
     异常或失败处理：模型角色未配置或单案失败时按现有异常策略处理；max_items 只截取本次试跑。"""
@@ -201,16 +199,16 @@ def run(input_path: str | Path = DEFAULT_PARSED_INPUT,
 def main() -> None:
     """用途：提供结构化提取 CLI，把输入、输出、试跑数量和 --use-llm 传给 run。
 
-    输入：参数来自 argparse，默认从 data/parsed 读取并写 data/cleaned。
+    输入：参数来自 argparse；clean 输入和 extract 输出路径均显式提供。
     输出：成功打印案件数；失败打印错误并以状态码 1 退出。
     运行前数据形态：运行前是命令行参数。
-    运行后数据变化：运行后生成可供候选题生成使用的 structured_cases.jsonl。
-    副作用：会覆盖指定 cleaned JSONL 和元数据；只有 --use-llm 时调用模型。
+    运行后数据变化：运行后生成可供候选题生成使用的 extract 案件 JSONL。
+    副作用：会覆盖指定 extract JSONL 和相邻元数据；只有 --use-llm 时调用模型。
     异常或失败处理：参数错误由 argparse 处理；run 抛出的异常转换为非零退出。"""
 
     parser = argparse.ArgumentParser(description="提取带原文定位的法律结构化信息")
-    parser.add_argument("--input", default=str(DEFAULT_PARSED_INPUT), help="解析后案件 JSONL")
-    parser.add_argument("--output", default=str(DATA_ROOT / "cleaned" / "structured_cases.jsonl"), help="结构化案件 JSONL")
+    parser.add_argument("--input", required=True, help="clean 阶段案件 JSONL")
+    parser.add_argument("--output", required=True, help="extract 阶段案件 JSONL")
     parser.add_argument("--max-items", "--max-cases", type=int, default=None, help="只处理前 N 案")
     parser.add_argument("--use-llm", action="store_true", help="使用模型提取；不传则使用可重复的规则提取")
     args = parser.parse_args()
@@ -224,5 +222,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

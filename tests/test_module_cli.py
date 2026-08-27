@@ -48,7 +48,7 @@ class LegalModuleCliTests(unittest.TestCase):
             with self.subTest(module=module_name):
                 completed = subprocess.run(
                     [sys.executable, "-m", module_name, "--help"],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                 )
                 output = completed.stdout + completed.stderr
                 self.assertEqual(completed.returncode, 0, output)
