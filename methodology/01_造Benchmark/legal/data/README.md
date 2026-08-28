@@ -1,47 +1,64 @@
-# 法律 Benchmark 数据目录
+# 法律 Benchmark 数据目录规范
 
-## 按批次组织
+## 1. 目录定位
 
-所有正式数据集都放在 `data/datasets/<dataset_id>/` 下。当前批次为：
-
-```text
-data/datasets/legal_20260827_001/
-├── raw/
-├── clean/
-├── extract/
-├── manifests/
-├── drafts/
-├── releases/
-└── README.md
-```
-
-`legal_20260827_001` 是批次 ID：日期表示创建日期，`001` 表示批次序号，不表示案例数。后续 51 条、100 条或另一批数据，只需新建批次目录并在命令行替换路径。
-
-## 数据流
+法律 Benchmark 的数据按**批次**隔离，不把案例数量写进目录名或文件名。每个批次使用一个独立的 `<dataset_id>`：
 
 ```text
-raw
-  → clean
-  → extract
-  → drafts
-  → releases
-  → validation
-  → evaluation
+data/
+└── datasets/
+    └── <dataset_id>/
+        ├── raw/
+        ├── clean/
+        ├── extract/
+        ├── manifests/
+        ├── drafts/
+        └── releases/
 ```
 
-- `raw/`：一案一文件的原始判决书，不修改原文。
-- `clean/`：无损解析后的案件 JSONL，例如 `legal_cases_clean.jsonl`。
-- `extract/`：提取法律争议、证据和结论后的案件 JSONL，例如 `legal_cases_extract.jsonl`。
-- `manifests/`：来源、选择和运行清单。
-- `drafts/`：待人工审核的候选题。
-- `releases/`：冻结后供验证和评测的正式题集。
+批次 ID 只用于区分一次数据集，不代表案例数量。以后新增 51 条、100 条或完全不同的一批案件，只需创建新的 `<dataset_id>`，再通过命令行传入该批次路径。
 
-## 路径约定
+## 2. 统一命令变量
 
-代码只在 `paths.py` 集中登记法律项目根路径；具体批次和文件路径不写死在代码中，统一通过 CLI 的 `--input`、`--output` 和相关参数传入。`--max-items` 只是试跑限制，不决定文件名。
+下面的变量是 PowerShell 示例中的通用占位约定。请把 `<dataset_id>` 替换为实际批次目录名；不要把试跑输出写回正式结果文件。
 
-## 追踪与验证
+```powershell
+$repo = "C:\llm-eval"
+$dataset = "$repo\methodology\01_造Benchmark\legal\data\datasets\<dataset_id>"
+```
 
-案件级追踪使用 `case_id` 和 `source.sha256`；运行级追踪使用相邻的 metadata 和 manifests。每个引用证据都应通过 `source_section`、`source_quote` 回查原文；validation 阶段检查结构、来源和一致性。
+- `$repo`：仓库根目录。
+- `$dataset`：本次处理的一个批次根目录；换批次时只修改这一行。
+- 每个阶段都可以独立运行，但必须用命令行显式指定输入和输出。
+- `--max-items` 只能限制试跑数量，不能替代正式输出文件命名。
+- 试跑应使用 `$env:TEMP` 下的独立目录或其他临时路径，避免覆盖正式批次。
 
-旧的 `data/raw/` 保留供用户已有资料使用，但不属于当前正式批次，也不作为命令默认输入。
+## 3. 数据流
+
+```text
+raw → clean → extract → drafts → releases → validation → evaluation
+```
+
+| 阶段 | 作用 | 典型结果 |
+|---|---|---|
+| `raw` | 保存原始案件文件，作为不可变审计底稿 | 一案一份 `.md` |
+| `clean` | 不调用大模型，做无损解析、章节切分和规则派生 | `legal_cases_clean.jsonl` |
+| `extract` | 从 clean 案件提取争议、证据判断和裁判结论 | `legal_cases_extract.jsonl` |
+| `manifests` | 记录来源、选择和批次级追踪信息 | `legal_sources.jsonl`、选择记录、报告 |
+| `drafts` | 保存模型生成但尚未发布的候选题 | `legal_questions_draft.jsonl` |
+| `releases` | 保存审核后冻结的正式题集 | `legal_questions_release_v1.jsonl` |
+| `validation` | 对题集结构、标签、证据和案件关系做校验 | 独立验证 JSONL |
+| `evaluation` | 调用被测模型并记录逐题评测结果 | 独立运行目录 |
+
+## 4. 路径和追踪原则
+
+- `paths.py` 只登记法律项目根目录；具体批次路径必须由 CLI 的 `--input`、`--output`、`--manifest-output` 等参数指定。
+- JSONL 保存案件或题目的业务数据；相邻 `.metadata.json` 保存一次运行的输入、输出、数量、方法、模型和状态等运行信息。
+- manifest 保存来源、选样和集合关系；它不是某一步处理逻辑的替代品。
+- `case_id` 是案件级稳定身份；`source.sha256` 是原始内容指纹。
+- 任何 `source_quote` 都应同时记录 `source_section`，并能在对应章节原文中回查。
+- 每个批次、每个阶段都应放置 README，说明本阶段文件、字段、字段来源、上下游和运行方式。
+
+## 5. 旧目录
+
+`data/raw/` 可以保留用户已有的历史资料，但不是批次链路的默认入口。正式运行统一使用 `data/datasets/<dataset_id>/...`。

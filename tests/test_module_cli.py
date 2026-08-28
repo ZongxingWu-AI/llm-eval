@@ -17,7 +17,8 @@ MODULES = [
     "methodology.02_构建题集.legal.generation.generate",
     "methodology.02_构建题集.legal.dataset.build",
     "methodology.02_构建题集.legal.validation.validate",
-    "methodology.04_跑项目.legal.evaluation.run",
+    "methodology.03_模型作答.legal.evaluation.run",
+    "methodology.04_结果评测.legal.scoring.run",
 ]
 
 

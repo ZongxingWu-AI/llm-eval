@@ -8,6 +8,7 @@
 import os    # 用来读环境变量、拼路径
 import sys   # 用来打印错误、退出
 import time  # 用来计时、在重试之间休眠
+from collections.abc import Callable
 
 
 # 项目根目录：本文件在 llm-eval/runner/ 下，往上一级就是 llm-eval。
@@ -107,10 +108,12 @@ def build_client(base_url, api_key):
     return client
 
 
-def call_model(client, model, prompt, temperature, max_tokens):
+def call_model(client, model, prompt, temperature, max_tokens,
+               before_attempt: Callable[[], None] | None = None):
     """用途：调用聊天模型并在临时错误时最多重试三次。
 
-    输入：client、model、prompt、temperature、max_tokens。
+    输入：client、model、prompt、temperature、max_tokens；可选的
+        before_attempt 在每次真正请求（包括重试）前调用一次。
     输出：返回 (文本, 延迟秒数, token 总数, finish_reason)。
     运行前数据形态：输入是完整 Prompt 和已创建客户端。
     运行后数据变化：响应被规范化为四元组，content 为空时回退 reasoning_content。
@@ -120,6 +123,8 @@ def call_model(client, model, prompt, temperature, max_tokens):
     last_err = None
     for attempt in range(3):
         try:
+            if before_attempt is not None:
+                before_attempt()
             # 运行前：prompt 是拼好的提示词。
             start_time = time.time()
             # 运行后：resp 是接口返回的完整响应对象。

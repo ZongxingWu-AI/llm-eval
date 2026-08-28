@@ -1,82 +1,173 @@
-"""法律正式题集验证模块。
+"""法律题集质量校验。
 
-项目位置：法律真实案例评测线的 validation 阶段。
-输入：命令行指定的正式题集 JSONL，以及 extract 阶段结构化案件。
-输出：legal_questions_validation_v1.jsonl、Markdown 摘要和相邻 metadata，逐题记录 valid 与 issues。
-上下游：上游是 dataset.build，下游是冻结题集后的 evaluation.run。
-副作用：覆盖验证报告；默认只做规则校验，传入 --use-llm 时才调用裁判模型。"""
+除旧有 taxonomy、来源引用和案件级 split 校验外，本模块还校验维度驱动题集契约：
+dimension_id、task_type、context_type、context 的一致性，以及题面答案泄露和可作答性。
+校验只读输入，不调用被测模型；--llm-check 仍可由调用方选择额外的语义复核。
+"""
+
+from __future__ import annotations
 
 import argparse
 import importlib
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 from core import llm_client
-
 from core.data_io import read_jsonl, write_jsonl
-from core.run_metadata import new_run_metadata
 from core.json_utils import parse_json_object
 from core.prompt_loader import load_template, render
 from core.project_paths import LEGAL_PROMPT_ROOT as PROMPT_ROOT
+from core.run_metadata import new_run_metadata
+
 _taxonomy = importlib.import_module("methodology.01_造Benchmark.legal.taxonomy")
 allowed_values = _taxonomy.allowed_values
 validate_cause_path = _taxonomy.validate_cause_path
 
+CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "dimension_catalog.json"
 REQUIRED_FIELDS = (
-    "question_id", "case_id", "split", "primary_issue", "task_type",
-    "reasoning_capabilities", "answer_type", "scoring_method", "difficulty",
-    "risk_level", "question", "reference_answer", "rubric", "source_evidence",
-    "case_classification",
+    "question_id", "case_id", "split", "case_classification", "dimension_id", "context_type", "context",
+    "primary_issue", "task_type", "reasoning_capabilities", "answer_type", "scoring_method",
+    "difficulty", "risk_level", "question", "reference_answer", "rubric", "source_evidence",
 )
 CONTROLLED_FIELDS = {
-    "task_type": "task_types",
-    "answer_type": "answer_types",
-    "scoring_method": "scoring_methods",
-    "difficulty": "difficulties",
-    "risk_level": "risk_levels",
+    "task_type": "task_types", "answer_type": "answer_types", "scoring_method": "scoring_methods",
+    "difficulty": "difficulties", "risk_level": "risk_levels",
 }
+CONTEXT_TYPES = {"self_contained", "source_excerpt", "full_document", "scenario"}
+DEICTIC_RE = re.compile(r"(根据上述|如上所述|上文|前述|如前所述)")
 
 
-def check_row(row: dict, case: dict | None = None) -> list[str]:
-    """用途：校验一道正式法律题的必填字段、受控标签、split 和来源引用。
+def _load_catalog() -> dict[str, Any]:
+    """执行法律题集流程辅助操作。"""
+    if not CONFIG_PATH.is_file():
+        return {"dimensions": []}
+    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
-    输入：row 是正式题目；case 可选，是同 case_id 的结构化案件。
-    输出：返回问题字符串列表，空列表表示该题通过规则校验。
-    运行前数据形态：运行前题目可能缺字段或含无来源证据。
-    运行后数据变化：运行后题目本身不变，只生成可人工处理的问题列表。
-    副作用：读取 taxonomy；只处理内存，不写文件、不调用模型。
-    异常或失败处理：每个问题单独追加，允许一次看到全部缺陷；case 存在时 source_quote 无法定位会报错。
-    最小示例：source_section=judgment 但 quote 不在主文时返回定位错误。"""
 
+def _dimension_map() -> dict[str, dict[str, Any]]:
+    """执行法律题集流程辅助操作。"""
+    return {
+        str(item.get("dimension_id")): item
+        for item in _load_catalog().get("dimensions", [])
+        if isinstance(item, dict) and item.get("dimension_id")
+    }
+
+
+def _allowed_context(config: dict[str, Any]) -> set[str]:
+    """执行法律题集流程辅助操作。"""
+    values = config.get("allowed_context_types", config.get("context_types", []))
+    if isinstance(values, str):
+        values = [values]
+    if not values and config.get("context_type"):
+        values = [config["context_type"]]
+    if not values and config.get("default_context_type"):
+        values = [config["default_context_type"]]
+    return {str(value) for value in values}
+
+
+def _context_text(context: Any) -> str:
+    """执行法律题集流程辅助操作。"""
+    if isinstance(context, str):
+        return context
+    if context is None:
+        return ""
+    return json.dumps(context, ensure_ascii=False)
+
+
+def _is_judgment_prediction(row: dict[str, Any]) -> bool:
+    """执行法律题集流程辅助操作。"""
+    return str(row.get("dimension_id", "")) == "judgment_prediction" or row.get("task_type") == "裁判结果预测"
+
+
+def _answer_leak_issues(row: dict[str, Any]) -> list[str]:
+    """执行法律题集流程辅助操作。"""
+    question = str(row.get("question", ""))
+    context = _context_text(row.get("context"))
+    reference = str(row.get("reference_answer", ""))
+    issues: list[str] = []
+    if reference.strip() and len(reference.strip()) >= 8 and reference.strip() in question + "\n" + context:
+        issues.append("题面或 context 直接包含完整参考答案")
+    if _is_judgment_prediction(row):
+        forbidden = ("判决如下", "裁判结果", "法院判令", "本院认为", "驳回诉讼请求", "支持原告")
+        if any(marker in context for marker in forbidden):
+            issues.append("裁判结果预测题的 context 疑似泄露法院结论")
+    return issues
+
+
+def build_model_input(row: dict[str, Any]) -> str:
+    """模拟 03 发送给被测模型的输入，确保题目不依赖隐藏的上文。"""
+    context = _context_text(row.get("context"))
+    question = str(row.get("question", ""))
+    if not context:
+        return question
+    return f"案件材料：\n{context}\n\n问题：\n{question}"
+
+
+def check_row(row: dict[str, Any], case: dict[str, Any] | None = None) -> list[str]:
+    """执行法律题集流程辅助操作。"""
     issues: list[str] = []
     for field in REQUIRED_FIELDS:
-        if not row.get(field):
+        if row.get(field) is None or row.get(field) == "" or row.get(field) == []:
             issues.append(f"缺字段 {field}")
 
     for field, taxonomy_field in CONTROLLED_FIELDS.items():
-        value = row.get(field)
-        if value not in allowed_values(taxonomy_field):
-            issues.append(f"{field} 非受控标签：{value}")
-    for value in row.get("reasoning_capabilities", []):
-        if value not in allowed_values("reasoning_capabilities"):
-            issues.append(f"reasoning_capabilities 非受控标签：{value}")
-    if row.get("split") not in {"dev", "calibration", "test"}:
-        issues.append(f"split 非法：{row.get('split')}")
+        if row.get(field) not in allowed_values(taxonomy_field):
+            issues.append(f"{field} 非受控标签：{row.get(field)}")
+    capabilities = row.get("reasoning_capabilities", [])
+    if not isinstance(capabilities, list) or not capabilities:
+        issues.append("reasoning_capabilities 必须是非空数组")
+    else:
+        for value in capabilities:
+            if value not in allowed_values("reasoning_capabilities"):
+                issues.append(f"reasoning_capabilities 非受控标签：{value}")
+        if len(capabilities) > 3:
+            issues.append("一题包含过多互不相关的 reasoning_capabilities")
+
+    dimension = _dimension_map().get(str(row.get("dimension_id", "")))
+    if not dimension:
+        issues.append(f"dimension_id 非受控维度：{row.get('dimension_id')}")
+    else:
+        expected_task = dimension.get("task_type")
+        if expected_task and row.get("task_type") != expected_task:
+            issues.append(f"task_type 与 dimension_id 不匹配：应为 {expected_task}")
+        contexts = _allowed_context(dimension)
+        if row.get("context_type") not in CONTEXT_TYPES:
+            issues.append(f"context_type 非法：{row.get('context_type')}")
+        elif contexts and row.get("context_type") not in contexts:
+            issues.append(f"context_type 不适用于该维度：{row.get('context_type')}")
+        recommended = dimension.get("scoring_methods", dimension.get("scoring_method"))
+        if isinstance(recommended, str):
+            recommended = [recommended]
+        if recommended and row.get("scoring_method") not in recommended:
+            issues.append(f"scoring_method 不适用于该维度：{row.get('scoring_method')}")
+
+    context = _context_text(row.get("context"))
+    question = str(row.get("question", ""))
+    if not context:
+        issues.append("context 不能为空：新题必须显式提供可作答材料")
+    elif context.strip() == question.strip():
+        issues.append("context 不能仅重复 question：新题必须提供独立案件材料")
+    if DEICTIC_RE.search(question) and not context:
+        issues.append("question 依赖未提供的上文材料")
+    if _is_judgment_prediction(row) and row.get("context_type") == "full_document":
+        issues.append("裁判结果预测题不能直接传入包含裁判结果的完整文书")
+    issues.extend(_answer_leak_issues(row))
+
     classification = row.get("case_classification")
     if not isinstance(classification, dict):
         issues.append("case_classification 缺失或不是对象")
     else:
         primary = classification.get("primary_category", "")
-        if classification.get("domain") not in allowed_values("domains"):
-            issues.append(f"domain 非受控标签：{classification.get('domain')}")
-        if classification.get("procedure_stage") not in allowed_values("procedure_stages"):
-            issues.append(f"procedure_stage 非受控标签：{classification.get('procedure_stage')}")
-        if classification.get("document_type") not in allowed_values("document_types"):
-            issues.append(f"document_type 非受控标签：{classification.get('document_type')}")
-        if primary not in allowed_values("primary_categories"):
-            issues.append(f"primary_category 非受控标签：{primary}")
+        for case_field, taxonomy_field in (
+            ("domain", "domains"), ("procedure_stage", "procedure_stages"),
+            ("document_type", "document_types"), ("primary_category", "primary_categories"),
+        ):
+            if classification.get(case_field) not in allowed_values(taxonomy_field):
+                issues.append(f"{case_field} 非受控标签：{classification.get(case_field)}")
         if not validate_cause_path(primary, classification.get("cause_path", [])):
             issues.append(f"cause_path 非受控路径：{classification.get('cause_path')}")
         for value in classification.get("procedure_tags", []):
@@ -85,78 +176,86 @@ def check_row(row: dict, case: dict | None = None) -> list[str]:
         for value in classification.get("evidence_tags", []):
             if value not in allowed_values("evidence_tags"):
                 issues.append(f"evidence_tags 非受控标签：{value}")
+
+    evidence = row.get("source_evidence", [])
+    if not isinstance(evidence, list) or not evidence:
+        issues.append("source_evidence 必须是非空数组")
+    for item in evidence if isinstance(evidence, list) else []:
+        if not isinstance(item, dict) or not item.get("source_section") or not item.get("source_quote"):
+            issues.append("source_evidence 条目缺少 source_section/source_quote")
+
     if case is not None:
         sections = case.get("sections", {})
-        for evidence in row.get("source_evidence", []):
-            section, quote = evidence.get("source_section", ""), evidence.get("source_quote", "")
-            if section not in sections or not quote or quote not in sections.get(section, ""):
+        full_text = str(case.get("full_text", ""))
+        for item in evidence if isinstance(evidence, list) else []:
+            if not isinstance(item, dict):
+                continue
+            section, quote = item.get("source_section", ""), item.get("source_quote", "")
+            section_text = sections.get(section, "") if isinstance(sections, dict) else ""
+            if not quote or (quote not in str(section_text) and quote not in full_text):
                 issues.append(f"source_quote 无法在 {section} 定位")
     return issues
 
 
-def validate(questions: list[dict], cases: list[dict] | None = None) -> list[dict]:
-    """用途：批量校验正式题集，并额外检查同一案件是否跨 split。
-
-    输入：questions 是正式题目列表；cases 可选，用于引用定位。
-    输出：返回每题一条验证记录，包含 question_id、case_id、valid 和 issues。
-    运行前数据形态：运行前是一组待验证问题和可选案件。
-    运行后数据变化：运行后得到逐题验证报告，不修改原题。
-    副作用：只处理内存并读取 taxonomy，不写文件、不调用模型。
-    异常或失败处理：找不到案件时仍执行字段校验；同案出现多个 split 时为相关题追加错误。"""
-
-    case_by_id: dict[str, dict] = {}
-    for case in cases or []:
-        case_by_id[case["case_id"]] = case
+def validate(questions: list[dict[str, Any]], cases: list[dict[str, Any]] | None = None,
+             blueprint: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """执行法律题集流程辅助操作。"""
+    case_by_id = {str(case["case_id"]): case for case in cases or [] if case.get("case_id")}
     split_by_case: dict[str, set[str]] = defaultdict(set)
     seen_questions: dict[str, str] = {}
-    findings: list[dict] = []
+    findings: list[dict[str, Any]] = []
     for row in questions:
-        split_by_case[row.get("case_id", "")].add(row.get("split", ""))
-        issues = check_row(row, case_by_id.get(row.get("case_id")) if cases is not None else None)
-        text = row.get("question", "")
-        if text in seen_questions:
+        question_id = str(row.get("question_id", ""))
+        split_by_case[str(row.get("case_id", ""))].add(str(row.get("split", "")))
+        issues = check_row(row, case_by_id.get(str(row.get("case_id"))))
+        text = str(row.get("question", ""))
+        if text in seen_questions and text:
             issues.append(f"与 {seen_questions[text]} 重复")
         elif text:
-            seen_questions[text] = row.get("question_id", "")
-        status = "pass" if not issues else "fail"
-        findings.append({
-            "question_id": row.get("question_id", ""),
-            "case_id": row.get("case_id", ""),
-            "status": status,
-            "issues": issues,
-        })
+            seen_questions[text] = question_id
+        findings.append({"question_id": question_id, "case_id": row.get("case_id", ""),
+                         "dimension_id": row.get("dimension_id", ""), "status": "pass" if not issues else "fail",
+                         "issues": issues})
     for case_id, splits in split_by_case.items():
         if len(splits) > 1:
-            findings.append({"question_id": "", "case_id": case_id, "status": "fail", "issues": [f"同案跨 split：{sorted(splits)}"]})
+            findings.append({"question_id": "", "case_id": case_id, "status": "fail",
+                             "issues": [f"同案跨 split：{sorted(splits)}"]})
+
+    if blueprint:
+        quotas = blueprint.get("dimension_quotas", blueprint.get("quotas", {}))
+        counts = defaultdict(int)
+        for row in questions:
+            counts[str(row.get("dimension_id", ""))] += 1
+        for dimension_id, target in quotas.items() if isinstance(quotas, dict) else []:
+            try:
+                shortage = int(target) - counts[str(dimension_id)]
+            except (TypeError, ValueError):
+                continue
+            if shortage > 0:
+                findings.append({"question_id": "", "case_id": "", "dimension_id": dimension_id,
+                                 "status": "warning", "issues": [f"维度配额不足：目标 {target}，实际 {counts[str(dimension_id)]}"]})
     return findings
 
 
-def run(input_path: str | Path, cases_path: str | Path,
-        output_path: str | Path,
-        max_items: int | None = None, use_llm: bool = False) -> list[dict]:
-    """用途：读取正式题集和可选案件，执行规则验证，并可用模型对通过项做补充复核。
-
-    输入：input_path、cases_path、output_path、max_items、use_llm 控制验证范围和方式。
-    输出：返回验证记录列表；写指定 JSONL、同目录 Markdown 摘要和相邻 metadata。
-    运行前数据形态：运行前是一行一道正式题。
-    运行后数据变化：运行后每行标记 valid 与问题列表，报告汇总通过和失败数量。
-    副作用：读取 JSONL、创建目录并覆盖报告；仅 use_llm=True 时读取 JUDGE 配置并调用模型。
-    异常或失败处理：模型复核失败会记录到该题 issues；文件或配置错误按调用方异常策略处理。"""
-
+def run(input_path: str | Path, cases_path: str | Path, output_path: str | Path,
+        max_items: int | None = None, use_llm: bool = False,
+        blueprint_path: str | Path | None = None) -> list[dict[str, Any]]:
+    """执行法律题集流程辅助操作。"""
     model = ""
     questions = read_jsonl(input_path)
     if max_items is not None and max_items > 0:
         questions = questions[:max_items]
     cases = read_jsonl(cases_path) if Path(cases_path).is_file() else None
-    findings = validate(questions, cases)
+    blueprint = None
+    if blueprint_path and Path(blueprint_path).is_file():
+        blueprint = json.loads(Path(blueprint_path).read_text(encoding="utf-8"))
+    findings = validate(questions, cases, blueprint)
     if use_llm:
         llm_client.load_env()
         base, key, model = llm_client.read_role("VALIDATOR", "deepseek-v4-flash")
         client = llm_client.build_client(base, key)
         template = load_template("legal_validator_prompt.md", PROMPT_ROOT)
-        by_id: dict[str, dict] = {}
-        for item in findings:
-            by_id[item["question_id"]] = item
+        by_id = {item["question_id"]: item for item in findings if item.get("question_id")}
         for question in questions:
             prompt = render(template, {"item": json.dumps(question, ensure_ascii=False)})
             raw = llm_client.call_model(client, model, prompt, 0, 8192)[0]
@@ -169,61 +268,33 @@ def run(input_path: str | Path, cases_path: str | Path,
                 by_id[question["question_id"]]["issues"].append("模型复核输出无法解析")
                 by_id[question["question_id"]]["status"] = "fail"
     write_jsonl(output_path, findings)
-    failure_count = 0
-    for item in findings:
-        if item["status"] == "fail":
-            failure_count += 1
-    report = [
-        "# 法律题集校验报告",
-        "",
-        f"- 题目数：{len(questions)}",
-        f"- 失败项：{failure_count}",
-        "",
-    ]
-    for item in findings:
-        report.append(f"- [{item['status'].upper()}] {item['question_id'] or item['case_id']}：{'；'.join(item['issues']) or '通过'}")
+    failures = sum(1 for item in findings if item["status"] == "fail")
     report_path = Path(output_path).with_suffix(".md")
+    report = ["# 法律题集校验报告", "", f"- 题目数：{len(questions)}", f"- 失败项：{failures}", ""]
+    for item in findings:
+        report.append(f"- [{item['status'].upper()}] {item.get('question_id') or item.get('case_id') or item.get('dimension_id')}: {'；'.join(item.get('issues', [])) or '通过'}")
     report_path.write_text("\n".join(report) + "\n", encoding="utf-8")
-    metadata = new_run_metadata(
-        "legal_benchmark.validation",
-        input=str(input_path),
-        cases=str(cases_path),
-        output=str(output_path),
-        report=str(report_path),
-        questions=len(questions),
-        failures=failure_count,
-        method="rules+llm" if use_llm else "rules",
-        model=model,
-    )
+    metadata = new_run_metadata("legal_benchmark.validation", input=str(input_path), cases=str(cases_path),
+                                output=str(output_path), report=str(report_path), questions=len(questions),
+                                failures=failures, method="rules+llm" if use_llm else "rules", model=model)
     Path(output_path).with_suffix(Path(output_path).suffix + ".metadata.json").write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     return findings
 
 
 def main() -> None:
-    """用途：提供题集验证 CLI，并用退出码区分全部通过和存在失败项。
-
-    输入：参数来自 argparse；题集、extract 案件和校验输出路径均显式提供。
-    输出：写出 JSONL/Markdown 报告；全部有效时退出 0，有任一无效题时退出 1。
-    运行前数据形态：运行前是正式题集和命令行参数。
-    运行后数据变化：运行后生成发布前质量报告，阻止无来源或跨 split 题进入评测。
-    副作用：创建目录并覆盖验证报告；只有 --use-llm 时调用裁判模型。
-    异常或失败处理：参数错误由 argparse 处理；运行异常或验证失败均产生非零退出。"""
-
-    parser = argparse.ArgumentParser(description="校验法律题集、受控标签、来源定位和案件级 split")
+    """执行法律题集流程辅助操作。"""
+    parser = argparse.ArgumentParser(description="校验法律题集、维度契约、上下文策略、来源定位和案件级 split")
     parser.add_argument("--input", required=True, help="正式题集 JSONL")
     parser.add_argument("--cases", required=True, help="extract 阶段案件 JSONL")
     parser.add_argument("--output", required=True, help="校验结果 JSONL")
+    parser.add_argument("--blueprint", default=None, help="可选题集蓝图 JSON")
     parser.add_argument("--max-items", type=int, default=None, help="只校验前 N 题")
     parser.add_argument("--llm-check", action="store_true", help="增加模型语义复核")
     args = parser.parse_args()
     try:
-        findings = run(args.input, args.cases, args.output, args.max_items, args.llm_check)
-        failed = 0
-        for item in findings:
-            if item["status"] == "fail":
-                failed += 1
+        findings = run(args.input, args.cases, args.output, args.max_items, args.llm_check, args.blueprint)
+        failed = sum(1 for item in findings if item["status"] == "fail")
         print(f"完成：{args.output}，失败项 {failed}")
         raise SystemExit(1 if failed else 0)
     except SystemExit:

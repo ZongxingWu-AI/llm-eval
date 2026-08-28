@@ -1,0 +1,32 @@
+{
+  "blueprint_id": "legal_v1_balanced_dimensions",
+  "target_total": 105,
+  "dimension_targets": {
+    "fact_extraction": 15,
+    "issue_identification": 10,
+    "rule_application": 25,
+    "evidence_evaluation": 15,
+    "judgment_prediction": 10,
+    "legal_argument": 10,
+    "amount_calculation": 5,
+    "compliance_refusal": 10,
+    "procedure_time_reasoning": 5
+  },
+  "case_type_minimum_counts": {
+    "合同、准合同纠纷": 1,
+    "劳动争议": 1,
+    "侵权责任纠纷": 1,
+    "婚姻家庭、继承纠纷": 1,
+    "物权纠纷": 1
+  },
+  "difficulty_distribution": {
+    "easy": 0.2,
+    "medium": 0.5,
+    "hard": 0.3
+  },
+  "risk_distribution": {
+    "low": 0.5,
+    "medium": 0.35,
+    "high": 0.15
+  }
+}

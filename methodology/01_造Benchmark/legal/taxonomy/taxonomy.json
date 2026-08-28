@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "domains": ["民事"],
   "procedure_stages": ["一审"],
   "document_types": ["判决书"],
@@ -17,8 +17,51 @@
     "婚姻家庭、继承纠纷": ["离婚纠纷", "离婚后财产纠纷", "抚养纠纷", "继承纠纷", "夫妻共同债务纠纷", "其他婚姻家庭、继承纠纷"],
     "物权纠纷": ["所有权确认纠纷", "返还原物纠纷", "排除妨害纠纷", "相邻关系纠纷", "房屋所有权纠纷", "其他物权纠纷"]
   },
-  "task_types": ["事实抽取", "争议焦点识别", "争议焦点识别与规则适用", "证据评价", "裁判结果预测", "法律论证", "金额计算", "合规拒答"],
-  "reasoning_capabilities": ["事实抽取", "法律规则适用", "证据评价", "因果推理", "金额计算", "时间推理", "多方主体关系识别", "风险识别"],
+  "task_types": [
+    "事实抽取",
+    "争议焦点识别",
+    "争议焦点识别与规则适用",
+    "法律规则适用",
+    "证据评价",
+    "裁判结果预测",
+    "法律论证",
+    "金额计算",
+    "合规拒答",
+    "程序与时间推理"
+  ],
+  "reasoning_capabilities": [
+    "事实抽取",
+    "法律规则适用",
+    "证据评价",
+    "因果推理",
+    "金额计算",
+    "时间推理",
+    "多方主体关系识别",
+    "风险识别"
+  ],
+  "dimension_ids": [
+    "fact_extraction",
+    "issue_identification",
+    "rule_application",
+    "evidence_evaluation",
+    "judgment_prediction",
+    "legal_argument",
+    "amount_calculation",
+    "compliance_refusal",
+    "procedure_time_reasoning"
+  ],
+  "context_types": ["source_excerpt", "full_document", "self_contained", "scenario"],
+  "dimension_task_type_map": {
+    "fact_extraction": "事实抽取",
+    "issue_identification": "争议焦点识别",
+    "rule_application": "法律规则适用",
+    "evidence_evaluation": "证据评价",
+    "judgment_prediction": "裁判结果预测",
+    "legal_argument": "法律论证",
+    "amount_calculation": "金额计算",
+    "compliance_refusal": "合规拒答",
+    "procedure_time_reasoning": "程序与时间推理"
+  },
   "answer_types": ["短答案", "结构化论述", "金额", "标签", "拒答与替代建议"],
   "scoring_methods": ["rule", "redline", "rubric_judge"],
   "difficulties": ["easy", "medium", "hard"],

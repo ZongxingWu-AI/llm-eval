@@ -8,7 +8,7 @@ import importlib
 import unittest
 from unittest.mock import patch
 
-_scorer = importlib.import_module("methodology.03_当裁判.legal.scoring.legal_scorer")
+_scorer = importlib.import_module("methodology.04_结果评测.legal.scoring.legal_scorer")
 score_by_judge = _scorer.score_by_judge
 score_by_rules = _scorer.score_by_rules
 score_one = _scorer.score_one

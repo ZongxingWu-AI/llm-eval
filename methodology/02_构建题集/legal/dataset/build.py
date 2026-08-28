@@ -1,222 +1,319 @@
 """法律正式题集组装模块。
 
-项目位置：法律真实案例评测线的 dataset 构建阶段。
-输入：命令行指定的 drafts JSONL 中经过人工审核的候选题。
-输出：releases/legal_questions_release_v1.jsonl、拒绝记录、legal_release_manifest_v1.json 和相邻 metadata。
-上下游：上游是出题与人工审稿，下游是 validation.validate 和 evaluation.run。
-副作用：覆盖指定 release、rejected 和 manifest 文件；不调用模型，不接触 raw 原文。"""
+候选题先经过字段、taxonomy、维度契约与人工审核状态校验，再依据题集蓝图按维度
+配额组装 release。配额不足不会静默忽略：覆盖缺口会写入 manifest 和 metadata；超过
+配额的候选题会进入 rejected 文件。案件级 split 仍由 split.assign_case_splits 统一分配。
+"""
+
+from __future__ import annotations
 
 import argparse
-import importlib
 import hashlib
+import importlib
 import json
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from core.data_io import read_jsonl, write_jsonl
 from core.run_metadata import new_run_metadata
 from .split import assign_case_splits
+
 _taxonomy = importlib.import_module("methodology.01_造Benchmark.legal.taxonomy")
 allowed_values = _taxonomy.allowed_values
 load_taxonomy = _taxonomy.load_taxonomy
 validate_cause_path = _taxonomy.validate_cause_path
 
-REQUIRED_FIELDS = ("case_id", "primary_issue", "task_type", "reasoning_capabilities", "answer_type",
-                   "scoring_method", "difficulty", "risk_level", "question", "reference_answer", "rubric", "source_evidence",
-                   "case_classification")
+CONFIG_ROOT = Path(__file__).resolve().parents[1] / "config"
+DEFAULT_CATALOG_PATH = CONFIG_ROOT / "dimension_catalog.json"
+DEFAULT_BLUEPRINT_PATH = CONFIG_ROOT / "dataset_blueprint.json"
+
+REQUIRED_FIELDS = (
+    "case_id", "dimension_id", "context_type", "context", "primary_issue", "task_type",
+    "reasoning_capabilities", "answer_type", "scoring_method", "difficulty", "risk_level",
+    "question", "reference_answer", "rubric", "source_evidence", "case_classification",
+)
 
 
-def _taxonomy_valid(row: dict) -> bool:
-    """用途：验证候选题的题目级和案件级标签是否全部来自受控 taxonomy。
+def _read_json(path: str | Path) -> dict[str, Any]:
+    """执行法律题集流程辅助操作。"""
+    target = Path(path)
+    return json.loads(target.read_text(encoding="utf-8"))
 
-    输入：row 是 generation 产生的候选题字典。
-    输出：所有类型、能力、案由路径和标签合法时返回 True，否则返回 False。
-    运行前数据形态：运行前候选题可能含模型自由生成标签。
-    运行后数据变化：运行后得到布尔判定，build 据此接收或拒绝题目。
-    副作用：读取 taxonomy 缓存，不修改 row、不写文件、不调用模型。
-    异常或失败处理：字段类型错误、未知标签或不连续 cause_path 都返回 False。"""
 
+def load_dimension_catalog(path: str | Path | None = None) -> dict[str, Any]:
+    """读取维度配置，并拒绝重复或缺失的 dimension_id。"""
+    catalog = _read_json(path or DEFAULT_CATALOG_PATH)
+    dimensions = catalog.get("dimensions", [])
+    if not isinstance(dimensions, list) or not dimensions:
+        raise ValueError("dimension_catalog 必须包含非空 dimensions 数组")
+    ids: list[str] = []
+    for item in dimensions:
+        if not isinstance(item, dict) or not str(item.get("dimension_id", "")).strip():
+            raise ValueError("dimension_catalog 中存在缺失 dimension_id 的维度")
+        ids.append(str(item["dimension_id"]))
+    duplicates = sorted(value for value, count in Counter(ids).items() if count > 1)
+    if duplicates:
+        raise ValueError(f"dimension_id 重复：{duplicates}")
+    return catalog
+
+
+def _dimension_map(catalog: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """执行法律题集流程辅助操作。"""
+    source = catalog or load_dimension_catalog()
+    return {str(item["dimension_id"]): item for item in source.get("dimensions", [])}
+
+
+def load_blueprint(path: str | Path | None = None, catalog: dict[str, Any] | None = None) -> dict[str, Any]:
+    """读取独立蓝图；不存在时由维度配置中的 target_count 生成默认蓝图。"""
+    target = Path(path) if path else DEFAULT_BLUEPRINT_PATH
+    if target.is_file():
+        return _read_json(target)
+    source = catalog or load_dimension_catalog()
+    embedded = source.get("blueprint")
+    if isinstance(embedded, dict):
+        return embedded
+    quotas = {
+        str(item["dimension_id"]): int(item.get("target_count", 0) or 0)
+        for item in source.get("dimensions", [])
+    }
+    return {"version": "1.0.0", "dimension_quotas": quotas}
+
+
+def _quota_map(blueprint: dict[str, Any] | None) -> dict[str, int]:
+    """执行法律题集流程辅助操作。"""
+    if not blueprint:
+        return {}
+    raw = blueprint.get("dimension_quotas", blueprint.get("dimension_targets", blueprint.get("quotas", {})))
+    if isinstance(raw, list):
+        return {
+            str(item.get("dimension_id", "")): int(item.get("target_count", item.get("count", 0)) or 0)
+            for item in raw if isinstance(item, dict) and item.get("dimension_id")
+        }
+    if isinstance(raw, dict):
+        result: dict[str, int] = {}
+        for key, value in raw.items():
+            if isinstance(value, dict):
+                value = value.get("target_count", value.get("count", 0))
+            result[str(key)] = int(value or 0)
+        return result
+    return {}
+
+
+def _allowed_context_types(config: dict[str, Any]) -> set[str]:
+    """执行法律题集流程辅助操作。"""
+    values = config.get("allowed_context_types", config.get("context_types", []))
+    if isinstance(values, str):
+        values = [values]
+    if not values and config.get("context_type"):
+        values = [config["context_type"]]
+    if not values and config.get("default_context_type"):
+        values = [config["default_context_type"]]
+    return {str(value) for value in values}
+
+
+def _taxonomy_valid(row: dict[str, Any], catalog: dict[str, Any] | None = None) -> bool:
+    """验证题目、案件分类以及维度映射均属于受控配置。"""
     classification = row.get("case_classification")
     if not isinstance(classification, dict):
         return False
 
-    controlled_question_fields = (
-        ("task_type", "task_types"),
-        ("answer_type", "answer_types"),
-        ("scoring_method", "scoring_methods"),
-        ("difficulty", "difficulties"),
+    for row_field, taxonomy_field in (
+        ("task_type", "task_types"), ("answer_type", "answer_types"),
+        ("scoring_method", "scoring_methods"), ("difficulty", "difficulties"),
         ("risk_level", "risk_levels"),
-    )
-    for row_field, taxonomy_field in controlled_question_fields:
-        value = row.get(row_field)
-        if value not in allowed_values(taxonomy_field):
+    ):
+        if row.get(row_field) not in allowed_values(taxonomy_field):
             return False
 
-    reasoning_capabilities = row.get("reasoning_capabilities", [])
-    if not isinstance(reasoning_capabilities, list):
+    capabilities = row.get("reasoning_capabilities", [])
+    if not isinstance(capabilities, list) or not capabilities:
         return False
-    allowed_reasoning = allowed_values("reasoning_capabilities")
-    for capability in reasoning_capabilities:
-        if capability not in allowed_reasoning:
+    if any(value not in allowed_values("reasoning_capabilities") for value in capabilities):
+        return False
+
+    dimensions = _dimension_map(catalog)
+    dimension = dimensions.get(str(row.get("dimension_id", "")))
+    if not dimension:
+        return False
+    if row.get("task_type") != dimension.get("task_type"):
+        return False
+    context = row.get("context")
+    question = row.get("question")
+    if context is None or str(context).strip() == "":
+        return False
+    context_text = context if isinstance(context, str) else json.dumps(context, ensure_ascii=False)
+    if str(context_text).strip() == str(question or "").strip():
+        return False
+    allowed_context = _allowed_context_types(dimension)
+    if allowed_context and row.get("context_type") not in allowed_context:
+        return False
+    recommended_scoring = dimension.get("scoring_methods", dimension.get("scoring_method"))
+    if isinstance(recommended_scoring, str):
+        recommended_scoring = [recommended_scoring]
+    if recommended_scoring and row.get("scoring_method") not in set(recommended_scoring):
+        return False
+
+    for case_field, taxonomy_field in (
+        ("domain", "domains"), ("procedure_stage", "procedure_stages"),
+        ("document_type", "document_types"), ("primary_category", "primary_categories"),
+    ):
+        if classification.get(case_field) not in allowed_values(taxonomy_field):
             return False
-
-    controlled_case_fields = (
-        ("domain", "domains"),
-        ("procedure_stage", "procedure_stages"),
-        ("document_type", "document_types"),
-        ("primary_category", "primary_categories"),
-    )
-    for case_field, taxonomy_field in controlled_case_fields:
-        value = classification.get(case_field)
-        if value not in allowed_values(taxonomy_field):
-            return False
-
-    primary_category = classification.get("primary_category", "")
-    cause_path = classification.get("cause_path", [])
-    if not isinstance(cause_path, list):
+    primary = classification.get("primary_category", "")
+    if not validate_cause_path(primary, classification.get("cause_path", [])):
         return False
-    if not validate_cause_path(primary_category, cause_path):
+    if any(value not in allowed_values("procedure_tags") for value in classification.get("procedure_tags", [])):
         return False
-
-    procedure_tags = classification.get("procedure_tags", [])
-    if not isinstance(procedure_tags, list):
+    if any(value not in allowed_values("evidence_tags") for value in classification.get("evidence_tags", [])):
         return False
-    allowed_procedure_tags = allowed_values("procedure_tags")
-    for tag in procedure_tags:
-        if tag not in allowed_procedure_tags:
-            return False
-
-    evidence_tags = classification.get("evidence_tags", [])
-    if not isinstance(evidence_tags, list):
+    applicable = dimension.get("applicable_case_types", [])
+    if applicable and "*" not in applicable and primary not in applicable:
         return False
-    allowed_evidence_tags = allowed_values("evidence_tags")
-    for tag in evidence_tags:
-        if tag not in allowed_evidence_tags:
-            return False
-
     return True
 
 
-def _accepted_sort_key(row: dict) -> tuple[str, str]:
-    """用途：为已接收候选题生成稳定的案件和题目排序键。
-
-    输入：row 是通过字段与 taxonomy 校验的题目。
-    输出：返回 (case_id, question) 字符串元组。
-    运行前数据形态：accepted 仍保留输入顺序。
-    运行后数据变化：排序后同案题集中排列，重复运行顺序稳定。
-    副作用：只读字典，不写文件、不调用模型。
-    异常或失败处理：字段缺失时用空字符串，确保排序仍可执行。"""
-    case_id = str(row.get("case_id", ""))
-    question = str(row.get("question", ""))
-    return case_id, question
+def _accepted_sort_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    """执行法律题集流程辅助操作。"""
+    return str(row.get("dimension_id", "")), str(row.get("case_id", "")), str(row.get("question", ""))
 
 
-def build(drafts: list[dict], include_pending: bool = False, max_items: int | None = None) -> tuple[list[dict], list[dict]]:
-    """用途：审核候选题必填字段、状态、taxonomy 和证据后，分配正式题号与案件级 split。
+def dimension_coverage(rows: list[dict[str, Any]], blueprint: dict[str, Any] | None = None) -> dict[str, Any]:
+    """汇总维度、案件类别、难度和风险覆盖，并显式列出配额缺口。"""
+    quota = _quota_map(blueprint)
+    dimension_counts = Counter(str(row.get("dimension_id", "未标注")) for row in rows)
+    category_counts: Counter[str] = Counter()
+    difficulty_counts = Counter(str(row.get("difficulty", "未标注")) for row in rows)
+    risk_counts = Counter(str(row.get("risk_level", "未标注")) for row in rows)
+    for row in rows:
+        classification = row.get("case_classification", {})
+        category = classification.get("primary_category", "未分类") if isinstance(classification, dict) else "未分类"
+        category_counts[str(category)] += 1
+    shortages = {
+        dimension_id: target - dimension_counts.get(dimension_id, 0)
+        for dimension_id, target in quota.items()
+        if target > dimension_counts.get(dimension_id, 0)
+    }
+    return {
+        "dimension_counts": dict(dimension_counts),
+        "dimension_quotas": quota,
+        "quota_shortages": shortages,
+        "quota_satisfied": not shortages,
+        "category_counts": dict(category_counts),
+        "difficulty_counts": dict(difficulty_counts),
+        "risk_counts": dict(risk_counts),
+    }
 
-    输入：drafts 是候选题列表；include_pending 控制开发试跑；max_items 限制接收数量。
-    输出：返回 (正式题目列表, 拒绝记录列表)。
-    运行前数据形态：运行前题目可能为 pending、无 question_id 或含非法标签。
-    运行后数据变化：运行后 accepted 获得稳定 question_id、dataset_version 和 split；同一 case_id 的题不会跨集合。
-    副作用：读取 taxonomy；只处理内存，不写文件、不调用模型。
-    异常或失败处理：缺字段、未获批准、标签非法或证据为空时记录明确 reject reason，不中断其他题。
-    最小示例：十个同类案件按固定规则分为 3 个 dev、2 个 calibration、5 个 test。"""
 
-    accepted: list[dict] = []
-    rejected: list[dict] = []
+def build_release(
+    drafts: list[dict[str, Any]], include_pending: bool = False, max_items: int | None = None,
+    blueprint: dict[str, Any] | None = None, catalog: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """按维度配额组装题集，返回题目、拒绝记录和覆盖统计。"""
+    catalog = catalog or load_dimension_catalog()
+    if blueprint is None:
+        blueprint = load_blueprint(catalog=catalog)
+    quotas = _quota_map(blueprint)
+    valid_by_dimension: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    rejected: list[dict[str, Any]] = []
+
     for draft in drafts:
         if not include_pending and draft.get("review_status") != "approved":
             continue
-        missing: list[str] = []
-        for field in REQUIRED_FIELDS:
-            if not draft.get(field):
-                missing.append(field)
-        taxonomy_valid = _taxonomy_valid(draft)
+        missing = [field for field in REQUIRED_FIELDS if not draft.get(field)]
+        taxonomy_valid = _taxonomy_valid(draft, catalog)
         if missing or not taxonomy_valid:
             rejected.append({
-                "case_id": draft.get("case_id", ""),
+                "case_id": draft.get("case_id", ""), "dimension_id": draft.get("dimension_id", ""),
                 "question": draft.get("question", ""),
                 "reason": f"missing={missing}; taxonomy_valid={taxonomy_valid}",
             })
             continue
-        accepted.append(dict(draft))
-        reached_limit = max_items is not None and max_items > 0 and len(accepted) >= max_items
-        if reached_limit:
-            break
+        valid_by_dimension[str(draft["dimension_id"])].append(dict(draft))
+
+    accepted: list[dict[str, Any]] = []
+    dimension_order = list(quotas) or sorted(valid_by_dimension)
+    for dimension_id in dimension_order:
+        candidates = sorted(valid_by_dimension.pop(dimension_id, []), key=_accepted_sort_key)
+        target = quotas.get(dimension_id, len(candidates))
+        selected = candidates[:target] if target > 0 else candidates
+        extras = candidates[len(selected):]
+        accepted.extend(selected)
+        for row in extras:
+            rejected.append({
+                "case_id": row.get("case_id", ""), "dimension_id": dimension_id,
+                "question": row.get("question", ""), "reason": f"dimension quota exceeded: {target}",
+            })
+    for dimension_id in sorted(valid_by_dimension):
+        accepted.extend(sorted(valid_by_dimension[dimension_id], key=_accepted_sort_key))
 
     accepted.sort(key=_accepted_sort_key)
+    if max_items is not None and max_items > 0 and len(accepted) > max_items:
+        for row in accepted[max_items:]:
+            rejected.append({
+                "case_id": row.get("case_id", ""), "dimension_id": row.get("dimension_id", ""),
+                "question": row.get("question", ""), "reason": f"max_items exceeded: {max_items}",
+            })
+        accepted = accepted[:max_items]
+
     counters: Counter[str] = Counter()
     release_date = date.today().isoformat()
     for row in accepted:
-        case_id = row["case_id"]
+        case_id = str(row["case_id"])
         counters[case_id] += 1
-        number = counters[case_id]
-        short_case_id = case_id.removeprefix("case_")
-        row["question_id"] = f"legal_{short_case_id}_{number:02d}"
+        row["question_id"] = f"legal_{case_id.removeprefix('case_')}_{counters[case_id]:02d}"
         row["version"] = "1.0.0"
         row["release_date"] = release_date
-    return assign_case_splits(accepted), rejected
+    accepted = assign_case_splits(accepted)
+    return accepted, rejected, dimension_coverage(accepted, blueprint)
 
 
-def run(input_path: str | Path, output_path: str | Path, manifest_path: str | Path,
-        max_items: int | None = None, include_pending: bool = False) -> list[dict]:
-    """用途：从 drafts JSONL 组装正式 release，并写拒绝记录和发布清单。
+def build(
+    drafts: list[dict[str, Any]], include_pending: bool = False, max_items: int | None = None,
+    blueprint: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """兼容原接口；详细覆盖数据由 build_release 返回。"""
+    accepted, rejected, _ = build_release(drafts, include_pending, max_items, blueprint)
+    return accepted, rejected
 
-    输入：input_path、output_path、manifest_output、max_items、include_pending 控制本次构建。
-    输出：返回正式题目列表；写指定 release、rejected JSONL、发布清单和相邻 metadata。
-    运行前数据形态：运行前是一行一道候选题。
-    运行后数据变化：运行后通过项进入 release，拒绝项单独留痕，manifest 汇总版本、哈希、split 和分类数量。
-    副作用：读取候选题，创建父目录并覆盖发布文件；不调用模型、不修改 raw 或 extract 数据。
-    异常或失败处理：输入不存在或写入失败时抛出；单题质量问题进入 rejected 文件。"""
 
+def run(
+    input_path: str | Path, output_path: str | Path, manifest_path: str | Path,
+    max_items: int | None = None, include_pending: bool = False,
+    blueprint_path: str | Path | None = None, catalog_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """执行法律题集流程辅助操作。"""
     drafts = read_jsonl(input_path)
-    questions, rejected = build(drafts, include_pending, max_items)
+    catalog = load_dimension_catalog(catalog_path)
+    blueprint = load_blueprint(blueprint_path, catalog)
+    questions, rejected, coverage = build_release(drafts, include_pending, max_items, blueprint, catalog)
     write_jsonl(output_path, questions)
-    rejected_path = Path(output_path).with_suffix(".rejected.jsonl")
+    rejected_path = Path(str(output_path) + ".rejected.jsonl")
     write_jsonl(rejected_path, rejected)
 
     output = Path(output_path)
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
-    split_counts: Counter[str] = Counter()
-    category_counts: Counter[str] = Counter()
-    case_ids: set[str] = set()
-    for row in questions:
-        split_counts[row["split"]] += 1
-        classification = row.get("case_classification", {})
-        if not isinstance(classification, dict):
-            classification = {}
-        category = classification.get("primary_category", "未分类")
-        category_counts[category] += 1
-        case_ids.add(row["case_id"])
-
+    split_counts = Counter(str(row["split"]) for row in questions)
+    case_ids = {str(row["case_id"]) for row in questions}
     taxonomy = load_taxonomy()
     manifest = {
-        "release_version": "1.0.0",
-        "taxonomy_version": taxonomy["version"],
-        "question_count": len(questions),
-        "case_count": len(case_ids),
-        "split_counts": dict(split_counts),
-        "category_counts": dict(category_counts),
-        "sha256": digest,
-        "source": str(input_path),
+        "release_version": "1.0.0", "taxonomy_version": taxonomy["version"],
+        "question_count": len(questions), "case_count": len(case_ids),
+        "split_counts": dict(split_counts), **coverage, "sha256": digest,
+        "source": str(input_path), "blueprint": str(blueprint_path or DEFAULT_BLUEPRINT_PATH),
         "raw_data_included": False,
     }
     target_manifest = Path(manifest_path)
     target_manifest.parent.mkdir(parents=True, exist_ok=True)
     target_manifest.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     metadata = new_run_metadata(
-        "legal_benchmark.dataset_build",
-        input=str(input_path),
-        output=str(output_path),
-        manifest_output=str(manifest_path),
-        rejected_output=str(rejected_path),
-        questions=len(questions),
-        cases=len(case_ids),
-        rejected=len(rejected),
-        method="rules",
-        model="",
+        "legal_benchmark.dataset_build", input=str(input_path), output=str(output_path),
+        manifest_output=str(manifest_path), rejected_output=str(rejected_path),
+        questions=len(questions), cases=len(case_ids), rejected=len(rejected),
+        dimension_counts=coverage["dimension_counts"], quota_shortages=coverage["quota_shortages"],
+        method="rules+dimension_blueprint", model="",
     )
     output.with_suffix(output.suffix + ".metadata.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -225,24 +322,21 @@ def run(input_path: str | Path, output_path: str | Path, manifest_path: str | Pa
 
 
 def main() -> None:
-    """用途：提供题集组装 CLI，把路径、数量和 --include-pending 传给 run。
-
-    输入：参数来自 argparse；默认读取 drafts 并写 releases 和 manifests。
-    输出：成功打印正式题数；失败打印错误并以状态码 1 退出。
-    运行前数据形态：运行前是候选题和命令行参数。
-    运行后数据变化：运行后得到可供 validation 使用的正式题集。
-    副作用：创建目录并覆盖 release、rejected 和 manifest；不调用模型。
-    异常或失败处理：参数错误由 argparse 处理；run 异常转换为非零退出。"""
-
-    parser = argparse.ArgumentParser(description="组装经人工审核的法律正式题集")
+    """执行法律题集流程辅助操作。"""
+    parser = argparse.ArgumentParser(description="按维度蓝图组装经人工审核的法律正式题集")
     parser.add_argument("--input", required=True, help="候选题 JSONL")
     parser.add_argument("--output", required=True, help="正式题集 JSONL")
     parser.add_argument("--manifest-output", required=True, help="发布清单 JSON")
+    parser.add_argument("--blueprint", default=None, help="题集蓝图 JSON；默认使用内置蓝图")
+    parser.add_argument("--dimension-catalog", default=None, help="维度配置 JSON；默认使用内置配置")
     parser.add_argument("--max-items", type=int, default=None, help="最多组装前 N 道通过项")
     parser.add_argument("--include-pending", action="store_true", help="仅用于开发试跑；正式发布不要使用")
     args = parser.parse_args()
     try:
-        questions = run(args.input, args.output, args.manifest_output, args.max_items, args.include_pending)
+        questions = run(
+            args.input, args.output, args.manifest_output, args.max_items,
+            args.include_pending, args.blueprint, args.dimension_catalog,
+        )
         print(f"完成：{args.output}，共 {len(questions)} 题")
     except Exception as exc:
         print(f"[错误] {exc}", file=sys.stderr)

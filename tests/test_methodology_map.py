@@ -15,8 +15,8 @@ METHODOLOGY_ROOT = PROJECT_ROOT / "methodology"
 TEACHING_DIRS = [
     METHODOLOGY_ROOT / "01_造Benchmark",
     METHODOLOGY_ROOT / "02_构建题集",
-    METHODOLOGY_ROOT / "03_当裁判",
-    METHODOLOGY_ROOT / "04_跑项目",
+    METHODOLOGY_ROOT / "03_模型作答",
+    METHODOLOGY_ROOT / "04_结果评测",
 ]
 
 

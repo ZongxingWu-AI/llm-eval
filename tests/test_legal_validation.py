@@ -29,9 +29,10 @@ class LegalValidationTests(unittest.TestCase):
 
         self.row = {
             "question_id": "q1", "case_id": "case_1", "split": "dev",
-            "primary_issue": "付款责任", "task_type": "事实抽取",
+            "primary_issue": "付款责任", "dimension_id": "fact_extraction", "task_type": "事实抽取",
             "reasoning_capabilities": ["事实抽取"], "answer_type": "短答案",
             "scoring_method": "rule", "difficulty": "easy", "risk_level": "low",
+            "context_type": "source_excerpt", "context": "卢某支付货款。",
             "question": "谁付款？", "reference_answer": "卢某付款。",
             "rubric": {"required_points": ["卢某"]},
             "source_evidence": [{"source_section": "judgment", "source_quote": "卢某支付货款"}],
@@ -83,6 +84,12 @@ class LegalValidationTests(unittest.TestCase):
         self.assertEqual(check_row(self.row, self.case), [])
         bad = {**self.row, "source_evidence": [{"source_section": "judgment", "source_quote": "任某支付货款"}]}
         self.assertTrue(any("无法" in issue for issue in check_row(bad, self.case)))
+
+    def test_context_cannot_be_only_a_copy_of_question(self):
+        """验证正式题不能把 question 原样复制成 context。"""
+        bad = {**self.row, "context": self.row["question"]}
+        issues = check_row(bad)
+        self.assertTrue(any("独立案件材料" in issue for issue in issues), issues)
 
     def test_same_case_cannot_cross_splits(self):
         """测试目标：验证同一 case_id 出现在多个 split 时整组报告错误。

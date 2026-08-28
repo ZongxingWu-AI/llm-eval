@@ -1,5 +1,19 @@
 """法律判决书无损解析模块。
 
+"不调用大模型，不试图理解复杂法律问题，而是先把原始判决书完整保存下来，同时用正则和关键词做基础结构化。"
+
+    作用：
+        不调用大模型
+        保留完整原文
+        切分章节
+        识别主体
+        找案号、日期、金额、法条、利息
+        做初步分类
+        生成 case_id
+        记录 sha256
+        生成质量状态
+
+
 项目位置：法律真实案例评测线的 ingestion 阶段。
 输入：命令行指定的批次 raw/ 目录中一案一文件的 Markdown 或文本判决书。
 输出：命令行指定的 clean JSONL、来源 manifest 和相邻 metadata；每案保留 full_text、章节、当事人、分类、哈希和质量状态。
@@ -32,7 +46,7 @@ SECTION_MARKERS = {
 
 def list_raw_files(raw_dir: str | Path) -> list[Path]:
     """用途：枚举 raw 目录中可交给解析器处理的判决书，并保持稳定文件顺序。
-
+       "先找哪些文件需要处理"
     输入：raw_dir 是原始案例目录路径。
     输出：返回按文件名排序的 .md/.txt Path 列表，README 不进入列表。
     运行前数据形态：目录可能同时包含 README、子目录和判决书。
@@ -438,7 +452,7 @@ def anonymize_text(text: str, parties: Iterable[dict[str, str]]) -> str:
 
 def parse_judgment(text: str, source_file: str = "") -> dict:
     """用途：把一份原始判决书组装成无损、可追溯的案件结构。
-
+           "一条案件具体生成什么字段？"
     输入：text 是未截断全文；source_file 是本地文件名。
     输出：返回含 case_id、source、document、parties、full_text、anonymized_text、sections、抽取字段、classification 和 quality 的字典。
     运行前数据形态：运行前是一段原始文本。

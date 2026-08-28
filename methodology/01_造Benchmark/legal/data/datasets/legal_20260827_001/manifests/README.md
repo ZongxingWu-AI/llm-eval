@@ -1,28 +1,58 @@
-# manifests：法律数据来源与阶段清单
+# manifests：来源与批次清单
 
-## 目录职责
+`manifests/` 是批次级和案件级的追踪目录，不是一个需要单独启动的处理阶段。它回答“这批数据中的案件对应哪些原始文件”，而 clean/extract JSONL 回答“案件解析和提取出了什么”。
 
-保存本批次的来源登记、案例选择记录和阶段报告。manifest 是“这批数据从哪里来、包含哪些案例、生成了什么”的运行级索引，不替代案件 JSONL 本身。
+## `legal_sources.jsonl`：案件级来源清单
 
-## 文件
+该文件由 clean 阶段生成，一行对应一个案件：
 
-- `legal_sources.jsonl`：由 `clean.py` 生成，一行一个原始案例，记录 `case_id`、`source_file`、`sha256`、来源和审核状态。
-- `legal_cases_selection.jsonl`：案例选择阶段的记录，保存选择原因和案例身份。
-- `legal_cases_selection_report.md`：对选择范围、数量和质量情况的可读摘要。
+| 字段 | 含义 |
+|---|---|
+| `case_id` | 与 clean、extract 记录对齐的案件 ID |
+| `source_file` | 当前批次 `raw/` 中的原始文件名 |
+| `sha256` | 原始文本内容的 SHA-256 指纹 |
+| `source_url` | 原始来源地址；本地资料可以为空 |
+| `retrieved_at` | 文件获取或登记时间 |
+| `reuse_status` | 来源是否可复用等状态 |
+| `review_status` | 来源或解析清单的审核状态 |
 
-## 追踪关系
+它的主要用途是把 clean/extract 中的一条案件结果回查到当前批次的 raw 原文，并检查原文是否被替换。若要重新生成它，重新运行 clean 并显式指定 `--manifest-output`。
 
-`legal_sources.jsonl` 的 `source_file` 应能在同一批次的 `raw/` 中找到；`case_id` 应与 `clean/legal_cases_clean.jsonl` 和 `extract/legal_cases_extract.jsonl` 对齐。`sha256` 用来检测原文是否被替换或修改。
+## 当前批次的边界
 
-## 运行
+当前批次不保留独立的选样阶段产物；正式链路从当前批次的 `raw/` 开始：
 
-来源清单由以下命令写入，输出路径必须由本次批次命令显式指定：
-
-```powershell
-python -m methodology.01_造Benchmark.legal.ingestion.clean `
-  --raw-dir "<dataset>/raw" `
-  --output "<dataset>/clean/legal_cases_clean.jsonl" `
-  --manifest-output "<dataset>/manifests/legal_sources.jsonl"
+```text
+raw/
+  → clean/legal_cases_clean.jsonl
+  → manifests/legal_sources.jsonl
+  → extract/legal_cases_extract.jsonl
 ```
 
-后续批次使用新的 `data/datasets/<dataset_id>/`，不修改本目录说明，也不把案例数量写入文件名。
+因此，`manifests/` 中的 `legal_sources.jsonl` 是当前正式链路的一部分；它不是题目数据，也不替代 clean 或 extract 的业务 JSONL。
+
+## 与 metadata 的区别
+
+| 文件类型 | 主要回答的问题 | 粒度 |
+|---|---|---|
+| `legal_sources.jsonl` | 这条案件来自哪个 raw 文件？原文指纹是什么？ | 一案一行 |
+| `clean/*.metadata.json` | clean 这次使用什么输入、输出、解析器和数量？ | 一次运行 |
+| `extract/*.metadata.json` | extract 这次使用什么输入、输出、模型/规则和数量？ | 一次运行 |
+| clean/extract 业务 JSONL | 这条案件具体解析或提取出了什么？ | 一案一行 |
+
+## 运行边界
+
+manifests 本身没有必须单独执行的 CLI。需要重新生成来源清单时，使用 clean 命令：
+
+```powershell
+$repo = "C:\llm-eval"
+$dataset = "$repo\methodology\01_造Benchmark\legal\data\datasets\<dataset_id>"
+Set-Location $repo
+
+py -m methodology.01_造Benchmark.legal.ingestion.clean `
+  --raw-dir "$dataset\raw" `
+  --output "$dataset\clean\legal_cases_clean.jsonl" `
+  --manifest-output "$dataset\manifests\legal_sources.jsonl"
+```
+
+运行时应使用新的批次目录和明确的输出路径，避免覆盖已有正式产物。

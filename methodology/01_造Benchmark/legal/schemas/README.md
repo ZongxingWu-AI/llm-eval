@@ -39,7 +39,7 @@ question.schema.json
 
 ## 5. 上游和下游
 
-候选题从 `data/drafts/` 进入正式题集前，由 `dataset.build` 和 `validation.validate` 共同检查。
+候选题从 `data/datasets/<dataset_id>/drafts/` 进入正式题集前，由 `dataset.build` 和 `validation.validate` 共同检查。
 
 ## 6. 是否提交 Git
 

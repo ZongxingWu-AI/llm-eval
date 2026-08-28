@@ -91,6 +91,16 @@ class LegalDocumentationTests(unittest.TestCase):
         self.assertNotIn("legal_cases_extracted_selected_50", merged)
         self.assertNotIn("cleaned/", merged)
 
+    def test_learning_compendium_uses_model_answering_before_result_scoring(self):
+        """验证总学习文档不把旧阶段名称或旧顺序继续传播。"""
+        path = PROJECT_ROOT / "学习文档" / "16-大模型评测方法论-从零件到整车.md"
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("03 模型作答", text)
+        self.assertIn("04 结果评测", text)
+        self.assertNotIn("03 当裁判", text)
+        self.assertNotIn("04 跑项目", text)
+        self.assertLess(text.find("模型作答"), text.find("结果评测"))
+
     def test_legal_source_has_no_external_business_dependency(self):
         """测试目标：确认法律项目生产代码不导入外部 C-Eval/LLM-as-Judge 业务包。
 

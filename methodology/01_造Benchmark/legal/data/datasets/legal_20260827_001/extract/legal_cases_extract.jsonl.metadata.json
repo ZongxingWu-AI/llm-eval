@@ -1,9 +1,15 @@
 {
   "track": "legal_benchmark.extraction",
-  "started_at": "2026-08-27T06:02:01.573402+00:00",
+  "started_at": "2026-08-27T14:56:51.228247+00:00",
   "input": "C:\\llm-eval\\methodology\\01_造Benchmark\\legal\\data\\datasets\\legal_20260827_001\\clean\\legal_cases_clean.jsonl",
   "output": "C:\\llm-eval\\methodology\\01_造Benchmark\\legal\\data\\datasets\\legal_20260827_001\\extract\\legal_cases_extract.jsonl",
   "count": 50,
-  "method": "llm_grounded",
-  "model": "glm-5.3"
+  "method": "mixed",
+  "method_counts": {
+    "rules": 1,
+    "llm_grounded": 49
+  },
+  "model": "GPT_91tmsz",
+  "workers": 4,
+  "qps": 3.0
 }

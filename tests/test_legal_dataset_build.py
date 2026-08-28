@@ -35,9 +35,10 @@ class DatasetBuildTests(unittest.TestCase):
                 "cause_path": ["合同、准合同纠纷", "买卖合同纠纷"],
                 "procedure_tags": [], "evidence_tags": ["书证"],
             },
-            "primary_issue": "付款责任", "task_type": "事实抽取",
+            "primary_issue": "付款责任", "dimension_id": "fact_extraction", "task_type": "事实抽取",
             "reasoning_capabilities": ["事实抽取"], "answer_type": "短答案",
             "scoring_method": "rule", "difficulty": "easy", "risk_level": risk_level,
+            "context_type": "source_excerpt", "context": "卢某支付货款。",
             "question": question, "reference_answer": "卢某付款。",
             "rubric": {"required_points": ["卢某"]},
             "source_evidence": [{"source_section": "judgment", "source_quote": "卢某付款"}],
@@ -84,6 +85,14 @@ class DatasetBuildTests(unittest.TestCase):
         self.assertEqual(rejected, [])
         self.assertEqual(len({row["split"] for row in accepted if row["case_id"] == "case_1"}), 1)
         self.assertEqual(len({row["question_id"] for row in accepted}), 3)
+
+    def test_build_rejects_context_that_only_repeats_question(self):
+        """验证独立 context 契约在组装 release 前生效。"""
+        draft = self._draft("case_1", "卢某支付货款。")
+        draft["context"] = draft["question"]
+        accepted, rejected = build([draft])
+        self.assertEqual(accepted, [])
+        self.assertEqual(len(rejected), 1)
 
     def test_build_rejects_uncontrolled_risk_label(self):
         """测试目标：验证未知 risk_level 不会进入正式题集。
