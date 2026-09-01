@@ -64,10 +64,11 @@ def _base_result(question: dict[str, Any], output: dict[str, Any]) -> dict[str, 
         "question_id": question.get("question_id", ""),
         "case_id": question.get("case_id", ""),
         "split": question.get("split", ""),
-        "primary_issue": question.get("primary_issue", ""),
         "dimension_id": question.get("dimension_id", ""),
         "task_type": question.get("task_type", ""),
+        "question_format": question.get("question_format", ""),
         "context_type": question.get("context_type", ""),
+        "sample_tags": question.get("sample_tags", []),
         "case_category": _case_category(question),
         "difficulty": question.get("difficulty", ""),
         "risk_level": question.get("risk_level", ""),
@@ -85,10 +86,14 @@ def _scoring_error_message(scoring: Any) -> str | None:
     """识别评分器返回的可结构化失败，兼容现有 Rubric Judge 解析失败口径。"""
     if not isinstance(scoring, dict):
         return "评分器返回了非对象结果"
-    if scoring.get("judge_reason") == "裁判输出无法解析":
+    judge_reason = str(scoring.get("judge_reason") or "")
+    reason = str(scoring.get("reason") or "")
+    if judge_reason == "未配置裁判模型" or reason == "未配置裁判模型":
+        return "未配置裁判模型"
+    if judge_reason == "裁判输出无法解析" or reason == "裁判解析失败":
         return "裁判输出无法解析"
-    if scoring.get("reason") == "裁判解析失败":
-        return "裁判输出无法解析"
+    if scoring.get("scoring_status") == "error":
+        return reason or judge_reason or "评分失败"
     return None
 
 
@@ -136,11 +141,15 @@ def score_outputs(
             failure = _scoring_error_message(scoring)
             if failure:
                 raise RuntimeError(failure)
+            diagnosis = legal_scorer.diagnose_errors(
+                question, str(output.get("model_answer") or ""), scoring,
+            )
             result.update({
                 "verdict": scoring.get("verdict", ""),
                 "reason": scoring.get("reason", ""),
                 "scoring_details": scoring,
                 "scoring_status": "ok",
+                **diagnosis,
             })
             results.append(result)
             print(result["verdict"])
@@ -151,6 +160,10 @@ def score_outputs(
                 "reason": reason,
                 "scoring_details": {},
                 "scoring_status": "error",
+                "error_tags": [],
+                "error_evidence": [],
+                "diagnostic_confidence": "low",
+                "diagnostic_method": "none",
             })
             results.append(result)
             errors.append({
@@ -158,6 +171,7 @@ def score_outputs(
                 "case_id": question.get("case_id", ""),
                 "dimension_id": question.get("dimension_id", ""),
                 "task_type": question.get("task_type", ""),
+                "question_format": question.get("question_format", ""),
                 "context_type": question.get("context_type", ""),
                 "case_category": _case_category(question),
                 "difficulty": question.get("difficulty", ""),
@@ -173,9 +187,14 @@ def _counts_by(results: list[dict[str, Any]], field: str) -> dict[str, Counter]:
     """按指定维度汇总 PASS、REVIEW、REJECT 与 ERROR。"""
     grouped: dict[str, Counter] = defaultdict(Counter)
     for row in results:
-        label = str(row.get(field) or "未分类")
+        value = row.get(field)
+        labels = value if field == "sample_tags" and isinstance(value, list) else [value]
+        if not labels:
+            labels = ["未分类"]
         verdict = str(row.get("verdict") or "ERROR")
-        grouped[label][verdict] += 1
+        for label_value in labels:
+            label = str(label_value or "未分类")
+            grouped[label][verdict] += 1
     return grouped
 
 
@@ -213,14 +232,16 @@ def build_report(results: list[dict[str, Any]]) -> str:
         f"- 题量：{len(results)}",
         f"- PASS：{total_counts['PASS']} / REVIEW：{total_counts['REVIEW']} / REJECT：{total_counts['REJECT']} / ERROR：{total_counts['ERROR']}",
         "", "## 每题结果", "",
-        "| 题号 | dimension_id | context_type | split | 案件类别 | 任务类型 | 难度 | 风险 | 评分方式 | 结论 |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| 题号 | dimension_id | question_format | context_type | split | 案件类别 | 任务类型 | 难度 | 风险 | 评分方式 | 结论 | 错误类型 |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in results:
         cells = [
-            row.get("question_id", ""), row.get("dimension_id", ""), row.get("context_type", ""), row.get("split", ""),
-            row.get("case_category", ""), row.get("task_type", ""), row.get("difficulty", ""),
-            row.get("risk_level", ""), row.get("scoring_method", ""), row.get("verdict", "") or "ERROR",
+            row.get("question_id", ""), row.get("dimension_id", ""), row.get("question_format", ""),
+            row.get("context_type", ""), row.get("split", ""), row.get("case_category", ""),
+            row.get("task_type", ""), row.get("difficulty", ""), row.get("risk_level", ""),
+            row.get("scoring_method", ""), row.get("verdict", "") or "ERROR",
+            ", ".join(str(x) for x in row.get("error_tags", []) or []),
         ]
         lines.append("| " + " | ".join(str(value).replace("|", "\\|") for value in cells) + " |")
 
@@ -231,8 +252,21 @@ def build_report(results: list[dict[str, Any]]) -> str:
         ("按案件类别统计", "case_category"),
         ("按难度统计", "difficulty"),
         ("按风险等级统计", "risk_level"),
+        ("按题型统计", "question_format"),
+        ("按专项标签统计", "sample_tags"),
     ):
         _append_group_section(lines, results, title, field)
+
+    lines.extend(["", "## 按错误类型统计", ""])
+    error_counts: Counter[str] = Counter()
+    for row in results:
+        for tag in row.get("error_tags", []) or []:
+            error_counts[str(tag)] += 1
+    if error_counts:
+        for tag, count in sorted(error_counts.items()):
+            lines.append(f"- {tag}：{count} 题")
+    else:
+        lines.append("- 无已诊断错误")
 
     lines.extend(["", "## 人工复核清单", ""])
     review_rows = [row for row in results if str(row.get("verdict") or "ERROR") in {"REVIEW", "ERROR"}]
@@ -277,6 +311,8 @@ def run(
     outputs = read_jsonl(output_source)
     if max_items is not None and max_items > 0:
         questions = questions[:max_items]
+        selected_ids = {str(row.get("question_id") or "") for row in questions}
+        outputs = [row for row in outputs if str(row.get("question_id") or "") in selected_ids]
     judge_client, judge_model = _build_judge_client(questions)
     results, errors = score_outputs(questions, outputs, judge_client, judge_model)
 
@@ -298,6 +334,15 @@ def run(
         output=str(run_dir),
     )
     metadata["completed_at"] = datetime.now(timezone.utc).isoformat()
+    metadata["dimension_counts"] = dict(Counter(str(row.get("dimension_id") or "unknown") for row in results))
+    metadata["question_format_counts"] = dict(Counter(str(row.get("question_format") or "unknown") for row in results))
+    metadata["verdict_counts"] = dict(Counter(str(row.get("verdict") or "ERROR") for row in results))
+    error_tag_counts = Counter()
+    for row in results:
+        tags = row.get("error_tags") if isinstance(row.get("error_tags"), list) else []
+        error_tag_counts.update(str(tag) for tag in tags)
+    metadata["error_tag_counts"] = dict(error_tag_counts)
+    metadata["scoring_status_counts"] = dict(Counter(str(row.get("scoring_status") or "error") for row in results))
     (run_dir / "run_metadata.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8",
     )

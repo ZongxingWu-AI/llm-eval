@@ -35,13 +35,13 @@ class DatasetBuildTests(unittest.TestCase):
                 "cause_path": ["合同、准合同纠纷", "买卖合同纠纷"],
                 "procedure_tags": [], "evidence_tags": ["书证"],
             },
-            "primary_issue": "付款责任", "dimension_id": "fact_extraction", "task_type": "事实抽取",
-            "reasoning_capabilities": ["事实抽取"], "answer_type": "短答案",
+            "dimension_id": "fact_extraction", "task_type": "事实抽取",
+            "answer_type": "短答案",
             "scoring_method": "rule", "difficulty": "easy", "risk_level": risk_level,
             "context_type": "source_excerpt", "context": "卢某支付货款。",
             "question": question, "reference_answer": "卢某付款。",
             "rubric": {"required_points": ["卢某"]},
-            "source_evidence": [{"source_section": "judgment", "source_quote": "卢某付款"}],
+            "source_evidence": [{"source_quote": "卢某付款"}],
             "review_status": "approved",
         }
 

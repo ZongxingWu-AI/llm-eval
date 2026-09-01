@@ -10,9 +10,11 @@
     "split",
     "case_classification",
     "dimension_id",
-    "primary_issue",
     "task_type",
-    "reasoning_capabilities",
+    "question_format",
+    "sample_tags",
+    "error_targets",
+    "answer_requirements",
     "answer_type",
     "context_type",
     "context",
@@ -25,10 +27,24 @@
     "source_evidence"
   ],
   "properties": {
-    "question_id": {"type": "string", "minLength": 1},
-    "case_id": {"type": "string", "minLength": 1},
-    "split": {"enum": ["dev", "calibration", "test"]},
-    "case_classification": {"type": "object"},
+    "question_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "split": {
+      "enum": [
+        "dev",
+        "calibration",
+        "test"
+      ]
+    },
+    "case_classification": {
+      "type": "object"
+    },
     "dimension_id": {
       "type": "string",
       "enum": [
@@ -43,7 +59,6 @@
         "procedure_time_reasoning"
       ]
     },
-    "primary_issue": {"type": "string", "minLength": 1},
     "task_type": {
       "type": "string",
       "enum": [
@@ -59,39 +74,316 @@
         "程序与时间推理"
       ]
     },
-    "reasoning_capabilities": {
-      "type": "array",
-      "minItems": 1,
-      "items": {"type": "string", "minLength": 1}
-    },
     "answer_type": {
       "type": "string",
-      "enum": ["短答案", "结构化论述", "金额", "标签", "拒答与替代建议"]
+      "enum": [
+        "短答案",
+        "结构化论述",
+        "金额",
+        "标签",
+        "拒答与替代建议",
+        "选项",
+        "选项集合",
+        "判断",
+        "结构化数据",
+        "法律文本"
+      ]
     },
     "context_type": {
       "type": "string",
-      "enum": ["source_excerpt", "full_document", "self_contained", "scenario"]
+      "enum": [
+        "source_excerpt",
+        "full_document",
+        "self_contained",
+        "scenario"
+      ]
     },
-    "context": {"type": "string", "minLength": 1},
-    "scoring_method": {"enum": ["rule", "redline", "rubric_judge"]},
-    "difficulty": {"enum": ["easy", "medium", "hard"]},
-    "risk_level": {"enum": ["low", "medium", "high"]},
-    "question": {"type": "string", "minLength": 1},
-    "reference_answer": {"type": "string", "minLength": 1},
-    "rubric": {"type": "object"},
+    "context": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scoring_method": {
+      "enum": [
+        "rule",
+        "redline",
+        "rubric_judge"
+      ]
+    },
+    "difficulty": {
+      "enum": [
+        "easy",
+        "medium",
+        "hard"
+      ]
+    },
+    "risk_level": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reference_answer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rubric": {
+      "type": "object"
+    },
     "source_evidence": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["source_section", "source_quote"],
+        "required": [
+          "source_quote"
+        ],
         "properties": {
-          "source_section": {"type": "string", "minLength": 1},
-          "source_quote": {"type": "string", "minLength": 1}
+          "source_quote": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_quote_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{64}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "question_format": {
+      "type": "string",
+      "enum": [
+        "single_choice",
+        "multiple_choice",
+        "true_false",
+        "numeric",
+        "structured_extraction",
+        "short_answer",
+        "case_analysis",
+        "legal_drafting",
+        "compliance_response"
+      ]
+    },
+    "sample_tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "error_targets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "answer_requirements": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "pair_id": {
+      "type": "string"
+    },
+    "pair_role": {
+      "enum": [
+        "base",
+        "counterfactual"
+      ]
+    },
+    "options": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": [
+          "option_id",
+          "text"
+        ],
+        "properties": {
+          "option_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "additionalProperties": true
       }
+    },
+    "correct_option": {
+      "type": "string"
+    },
+    "correct_options": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "distractor_rationales": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "numeric_answer": {
+      "type": "number"
+    },
+    "numeric_tolerance": {
+      "type": "number",
+      "minimum": 0
+    },
+    "numeric_unit": {
+      "type": "string"
+    },
+    "calculation_steps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
-  "additionalProperties": true
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "question_format": {
+            "const": "single_choice"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "options",
+          "correct_option",
+          "distractor_rationales"
+        ],
+        "properties": {
+          "options": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "correct_option": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "question_format": {
+            "const": "multiple_choice"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "options",
+          "correct_options",
+          "distractor_rationales"
+        ],
+        "properties": {
+          "options": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "correct_options": {
+            "type": "array",
+            "minItems": 2
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "question_format": {
+            "const": "true_false"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "correct_answer"
+        ],
+        "properties": {
+          "correct_answer": {
+            "type": [
+              "boolean",
+              "string"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "question_format": {
+            "const": "numeric"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "numeric_answer",
+          "numeric_unit"
+        ],
+        "properties": {
+          "numeric_answer": {
+            "type": "number"
+          },
+          "numeric_tolerance": {
+            "type": "number",
+            "minimum": 0
+          },
+          "numeric_unit": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "question_format": {
+            "const": "structured_extraction"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "structured_answer"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "question_format": {
+            "const": "compliance_response"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "answer_requirements": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  ]
 }

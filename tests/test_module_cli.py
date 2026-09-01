@@ -54,6 +54,9 @@ class LegalModuleCliTests(unittest.TestCase):
                 output = completed.stdout + completed.stderr
                 self.assertEqual(completed.returncode, 0, output)
                 self.assertTrue("usage" in output.lower() or "帮助" in output, output)
+                if module_name == "methodology.02_构建题集.legal.generation.generate":
+                    self.assertIn("--workers", output)
+                    self.assertIn("--qps", output)
 
 
 if __name__ == "__main__":

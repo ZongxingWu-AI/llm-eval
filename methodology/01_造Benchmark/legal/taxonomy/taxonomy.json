@@ -1,8 +1,14 @@
 {
-  "version": "1.1.0",
-  "domains": ["民事"],
-  "procedure_stages": ["一审"],
-  "document_types": ["判决书"],
+  "version": "1.2.0",
+  "domains": [
+    "民事"
+  ],
+  "procedure_stages": [
+    "一审"
+  ],
+  "document_types": [
+    "判决书"
+  ],
   "primary_categories": [
     "合同、准合同纠纷",
     "劳动争议",
@@ -11,11 +17,46 @@
     "物权纠纷"
   ],
   "cause_tree": {
-    "合同、准合同纠纷": ["买卖合同纠纷", "民间借贷纠纷", "租赁合同纠纷", "服务合同纠纷", "劳务合同纠纷", "其他合同纠纷"],
-    "劳动争议": ["确认劳动关系纠纷", "劳动报酬纠纷", "解除劳动合同纠纷", "经济补偿金纠纷", "工伤保险待遇纠纷", "其他劳动争议"],
-    "侵权责任纠纷": ["机动车交通事故责任纠纷", "医疗损害责任纠纷", "产品责任纠纷", "违反安全保障义务责任纠纷", "人身损害赔偿纠纷", "其他侵权责任纠纷"],
-    "婚姻家庭、继承纠纷": ["离婚纠纷", "离婚后财产纠纷", "抚养纠纷", "继承纠纷", "夫妻共同债务纠纷", "其他婚姻家庭、继承纠纷"],
-    "物权纠纷": ["所有权确认纠纷", "返还原物纠纷", "排除妨害纠纷", "相邻关系纠纷", "房屋所有权纠纷", "其他物权纠纷"]
+    "合同、准合同纠纷": [
+      "买卖合同纠纷",
+      "民间借贷纠纷",
+      "租赁合同纠纷",
+      "服务合同纠纷",
+      "劳务合同纠纷",
+      "其他合同纠纷"
+    ],
+    "劳动争议": [
+      "确认劳动关系纠纷",
+      "劳动报酬纠纷",
+      "解除劳动合同纠纷",
+      "经济补偿金纠纷",
+      "工伤保险待遇纠纷",
+      "其他劳动争议"
+    ],
+    "侵权责任纠纷": [
+      "机动车交通事故责任纠纷",
+      "医疗损害责任纠纷",
+      "产品责任纠纷",
+      "违反安全保障义务责任纠纷",
+      "人身损害赔偿纠纷",
+      "其他侵权责任纠纷"
+    ],
+    "婚姻家庭、继承纠纷": [
+      "离婚纠纷",
+      "离婚后财产纠纷",
+      "抚养纠纷",
+      "继承纠纷",
+      "夫妻共同债务纠纷",
+      "其他婚姻家庭、继承纠纷"
+    ],
+    "物权纠纷": [
+      "所有权确认纠纷",
+      "返还原物纠纷",
+      "排除妨害纠纷",
+      "相邻关系纠纷",
+      "房屋所有权纠纷",
+      "其他物权纠纷"
+    ]
   },
   "task_types": [
     "事实抽取",
@@ -29,16 +70,6 @@
     "合规拒答",
     "程序与时间推理"
   ],
-  "reasoning_capabilities": [
-    "事实抽取",
-    "法律规则适用",
-    "证据评价",
-    "因果推理",
-    "金额计算",
-    "时间推理",
-    "多方主体关系识别",
-    "风险识别"
-  ],
   "dimension_ids": [
     "fact_extraction",
     "issue_identification",
@@ -50,7 +81,12 @@
     "compliance_refusal",
     "procedure_time_reasoning"
   ],
-  "context_types": ["source_excerpt", "full_document", "self_contained", "scenario"],
+  "context_types": [
+    "source_excerpt",
+    "full_document",
+    "self_contained",
+    "scenario"
+  ],
   "dimension_task_type_map": {
     "fact_extraction": "事实抽取",
     "issue_identification": "争议焦点识别",
@@ -62,10 +98,96 @@
     "compliance_refusal": "合规拒答",
     "procedure_time_reasoning": "程序与时间推理"
   },
-  "answer_types": ["短答案", "结构化论述", "金额", "标签", "拒答与替代建议"],
-  "scoring_methods": ["rule", "redline", "rubric_judge"],
-  "difficulties": ["easy", "medium", "hard"],
-  "risk_levels": ["low", "medium", "high"],
-  "procedure_tags": ["管辖", "举证责任", "诉讼时效", "缺席审理", "反诉", "鉴定", "保全", "调解"],
-  "evidence_tags": ["书证", "电子数据", "证人证言", "鉴定意见", "当事人陈述", "视听资料", "勘验笔录", "证据不足"]
+  "answer_types": [
+    "短答案",
+    "结构化论述",
+    "金额",
+    "标签",
+    "拒答与替代建议"
+  ],
+  "scoring_methods": [
+    "rule",
+    "redline",
+    "rubric_judge"
+  ],
+  "difficulties": [
+    "easy",
+    "medium",
+    "hard"
+  ],
+  "risk_levels": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "procedure_tags": [
+    "管辖",
+    "举证责任",
+    "诉讼时效",
+    "缺席审理",
+    "反诉",
+    "鉴定",
+    "保全",
+    "调解"
+  ],
+  "evidence_tags": [
+    "书证",
+    "电子数据",
+    "证人证言",
+    "鉴定意见",
+    "当事人陈述",
+    "视听资料",
+    "勘验笔录",
+    "证据不足"
+  ],
+  "question_formats": [
+    "single_choice",
+    "multiple_choice",
+    "true_false",
+    "numeric",
+    "structured_extraction",
+    "short_answer",
+    "case_analysis",
+    "legal_drafting",
+    "compliance_response"
+  ],
+  "sample_tags": [
+    "long_context",
+    "cross_section",
+    "long_tail",
+    "common_error",
+    "edge_case",
+    "high_risk",
+    "adversarial",
+    "hallucination_resistance",
+    "distractor",
+    "minimal_pair",
+    "counterfactual",
+    "incomplete_information",
+    "privacy_sensitive",
+    "uncertainty_required"
+  ],
+  "error_types": [
+    "factual_omission",
+    "factual_hallucination",
+    "entity_confusion",
+    "issue_missed",
+    "rule_misapplication",
+    "element_omission",
+    "statute_hallucination",
+    "similar_concept_confusion",
+    "evidence_overclaim",
+    "burden_of_proof_error",
+    "causation_error",
+    "temporal_error",
+    "amount_calculation_error",
+    "unsupported_conclusion",
+    "counterargument_omission",
+    "instruction_failure",
+    "format_error",
+    "refusal_failure",
+    "over_refusal",
+    "privacy_leak",
+    "uncertainty_failure"
+  ]
 }

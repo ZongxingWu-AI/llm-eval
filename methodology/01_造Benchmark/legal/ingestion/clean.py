@@ -5,7 +5,6 @@
     作用：
         不调用大模型
         保留完整原文
-        切分章节
         识别主体
         找案号、日期、金额、法条、利息
         做初步分类
@@ -16,7 +15,7 @@
 
 项目位置：法律真实案例评测线的 ingestion 阶段。
 输入：命令行指定的批次 raw/ 目录中一案一文件的 Markdown 或文本判决书。
-输出：命令行指定的 clean JSONL、来源 manifest 和相邻 metadata；每案保留 full_text、章节、当事人、分类、哈希和质量状态。
+输出：命令行指定的 clean JSONL、来源 manifest 和相邻 metadata；每案保留 full_text、external_text、当事人、分类、哈希和质量状态。
 上下游：上游是人工收集的原始案例，下游是 extraction.extract 的法律信息提取。
 副作用：读取本地原始文件并覆盖指定 JSONL 输出；不调用大模型，也不修改 raw 文件。"""
 
@@ -32,16 +31,10 @@ from typing import Iterable
 
 from core.data_io import write_jsonl
 from core.run_metadata import new_run_metadata
+from .pii_redaction import redact_pii
 
-PARSER_VERSION = "legal-parser-v3"
+PARSER_VERSION = "legal-parser-v4"
 ROLE_LABELS = ("原告", "被告", "第三人", "申请人", "被申请人", "上诉人", "被上诉人", "委托诉讼代理人", "诉讼代理人", "法定代表人")
-SECTION_MARKERS = {
-    "claims": ("诉讼请求", "请求事项"),
-    "defenses": ("被告辩称", "被告答辩", "答辩意见", "未作答辩"),
-    "facts": ("经审理查明", "审理查明", "本院查明"),
-    "court_reasoning": ("本院认为", "法院认为"),
-    "judgment": ("判决如下", "裁判主文", "判决主文"),
-}
 
 
 def list_raw_files(raw_dir: str | Path) -> list[Path]:
@@ -104,7 +97,7 @@ def extract_case_no(text: str) -> str:
     运行前数据形态：原文案号可能使用半角或全角括号。
     运行后数据变化：输出统一使用中文全角括号。
     副作用：只做正则匹配，不修改全文、不写文件、不调用模型。
-    异常或失败处理：不符合当前案号模式时返回空字符串，交由 quality.missing_sections 提醒人工复核。"""
+    异常或失败处理：不符合当前案号模式时返回空字符串，交由质量状态和人工复核处理。"""
 
     match = re.search(r"[（(]\d{4}[）)][^\n，。；;]{2,40}号", text)
     return match.group(0).replace("(", "（").replace(")", "）") if match else ""
@@ -221,67 +214,6 @@ def extract_parties(text: str) -> list[dict[str, str]]:
             party["party_id"] = f"party_{len(unique) + 1:02d}"
             unique.append(party)
     return unique
-
-
-def _marker_positions(text: str) -> list[tuple[int, str, str]]:
-    """用途：定位诉讼请求、答辩、事实、法院说理和判决主文的章节标记。
-
-    输入：text 是完整判决书；SECTION_MARKERS 提供受控标记词。
-    输出：返回按字符位置排序的 (位置, 章节名, 命中标记) 元组列表。
-    运行前数据形态：输入尚未切分，仍是一段完整字符串。
-    运行后数据变化：输出记录边界，不删除任何正文。
-    副作用：只扫描内存文本，不写文件、不调用模型。
-    异常或失败处理：某章节无标记时不生成位置；重复标记只保留用于后续切分的实际命中。"""
-
-    positions: list[tuple[int, str, str]] = []
-    for section, markers in SECTION_MARKERS.items():
-        section_matches: list[tuple[int, str, str]] = []
-        for marker in markers:
-            match = re.search(re.escape(marker), text)
-            if match:
-                section_matches.append((match.start(), marker, section))
-        if section_matches:
-            positions.append(min(section_matches))
-    return sorted(positions)
-
-
-def split_sections(text: str) -> dict[str, str]:
-    """用途：按已识别标记无损切分法律章节，并保留未归类的前置文本。
-
-    输入：text 是完整判决书全文。
-    输出：返回 sections 字典，可能包含 claims、defenses、facts、court_reasoning、judgment 和 header。
-    运行前数据形态：运行前只有一段全文。
-    运行后数据变化：运行后新增可定位章节，但各章节文本仍来自原文连续片段。
-    副作用：只在内存中切片，不写文件、不调用模型；full_text 由调用方原样保留。
-    异常或失败处理：没有章节标记时返回以 header 保存全文的字典；缺失章节由 parse_judgment 记录质量状态。
-    最小示例：“本院认为”到“判决如下”之间会成为 court_reasoning。"""
-
-    sections: dict[str, str] = {}
-    for key in ("header", "claims", "defenses", "facts", "evidence", "court_reasoning", "judgment", "tail"):
-        sections[key] = ""
-    positions = _marker_positions(text)
-    if not positions:
-        sections["header"] = text
-        return sections
-    sections["header"] = text[:positions[0][0]]
-    for index, (start, _marker, section) in enumerate(positions):
-        has_next = index + 1 < len(positions)
-        if has_next:
-            end = positions[index + 1][0]
-        else:
-            end = len(text)
-        sections[section] = text[start:end]
-    facts = sections["facts"]
-    evidence_match = re.search(r"(?:以上事实|上述事实).{0,20}(?:证据|证明)", facts)
-    if evidence_match:
-        sections["evidence"] = facts[evidence_match.start():]
-        sections["facts"] = facts[:evidence_match.start()]
-    judgment = sections["judgment"]
-    tail_match = re.search(r"(?:如不服本判决|审判长|审判员|书记员|本件与原本核对无异)", judgment)
-    if tail_match:
-        sections["tail"] = judgment[tail_match.start():]
-        sections["judgment"] = judgment[:tail_match.start()]
-    return sections
 
 
 def extract_statutes(text: str) -> list[str]:
@@ -435,7 +367,7 @@ def anonymize_text(text: str, parties: Iterable[dict[str, str]]) -> str:
     """用途：根据当事人列表生成脱敏副本，原始 full_text 始终保留。
 
     输入：text 是原文；parties 是包含 role/name 的可迭代对象。
-    输出：返回把非空姓名替换为“角色编号”的 anonymized_text 字符串。
+    输出：返回把非空姓名替换为“角色编号”的 external_text 字符串。
     运行前数据形态：运行前文本含真实当事人名称。
     运行后数据变化：运行后返回脱敏文本；调用方仍把原文完整存入 full_text。
     副作用：只在内存中生成新字符串，不修改 raw 文件、不写文件、不调用模型。
@@ -451,30 +383,22 @@ def anonymize_text(text: str, parties: Iterable[dict[str, str]]) -> str:
 
 
 def parse_judgment(text: str, source_file: str = "") -> dict:
-    """用途：把一份原始判决书组装成无损、可追溯的案件结构。
-           "一条案件具体生成什么字段？"
+    """用途：把一份原始判决书组装成无损、可追溯的 clean 案件结构。
+
     输入：text 是未截断全文；source_file 是本地文件名。
-    输出：返回含 case_id、source、document、parties、full_text、anonymized_text、sections、抽取字段、classification 和 quality 的字典。
+    输出：返回 full_text、唯一脱敏全文 external_text、案件元数据、规则抽取字段、classification 和 quality；不生成 sections、external_sections 或 facts_summary。
     运行前数据形态：运行前是一段原始文本。
-    运行后数据变化：运行后 full_text 原样保留，同时新增章节、多方当事人、哈希、分类和质量元数据。
+    运行后数据变化：full_text 原样保留，external_text 由本地脱敏规则生成；案号、主体、哈希、分类和质量元数据按原有规则生成。
     副作用：仅处理内存和读取 taxonomy；不写文件、不调用模型、不修改原始文本。
-    异常或失败处理：缺失案号或关键章节不会丢弃案件，而是在 quality.missing_sections 和 status 中记录。
-    最小示例：输入浙江买卖合同判决书后，court_reasoning 与 judgment 可分别通过 sections 定位。"""
+    异常或失败处理：字段缺失不会丢弃案件，交由后续 extraction 或人工复核处理。"""
 
     case_no = extract_case_no(text)
     digest = sha256_text(text)
     parties = extract_parties(text)
-    sections = split_sections(text)
     category = infer_category(text)
     procedure_stage = _infer_procedure(case_no)
     document_type = "判决书" if re.search(r"判\s*决\s*书", text) else ""
     domain = "民事" if "民" in case_no or "民事" in text else ""
-
-    required_sections = ("claims", "facts", "court_reasoning", "judgment")
-    missing_sections: list[str] = []
-    for key in required_sections:
-        if not sections[key]:
-            missing_sections.append(key)
 
     document = {
         "case_no": case_no,
@@ -489,7 +413,6 @@ def parse_judgment(text: str, source_file: str = "") -> dict:
         "document_type": document_type,
         "primary_category": category,
         "cause_path": infer_cause_path(text, category),
-        "legal_issues": [],
         "procedure_tags": [],
         "evidence_tags": [],
     }
@@ -497,9 +420,9 @@ def parse_judgment(text: str, source_file: str = "") -> dict:
         "parser_version": PARSER_VERSION,
         "processed_at": datetime.now(timezone.utc).isoformat(),
         "review_status": "pending",
-        "status": "needs_review" if missing_sections else "parsed",
-        "missing_sections": missing_sections,
+        "status": "parsed",
     }
+    external_text, _pii_mapping = redact_pii(text, parties)
     return {
         "case_id": "case_" + digest[:12],
         "source": {
@@ -512,9 +435,7 @@ def parse_judgment(text: str, source_file: str = "") -> dict:
         "document": document,
         "parties": parties,
         "full_text": text,
-        "anonymized_text": anonymize_text(text, parties),
-        "sections": sections,
-        "facts_summary": sections.get("facts", "").strip(),
+        "external_text": external_text,
         "cited_statutes": extract_statutes(text),
         "amounts": extract_amounts(text),
         "dates": extract_dates(text),
@@ -605,4 +526,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

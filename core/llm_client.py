@@ -71,6 +71,44 @@ def read_role(prefix, default_model):
     return base_url, api_key, model
 
 
+def read_explicit_role(prefix: str) -> tuple[str, str, str]:
+    """只读取角色专用配置，不回退到任何通用角色变量。
+
+    Reviewer 等需要身份隔离的角色必须同时配置 BASE_URL、API_KEY、MODEL。
+    """
+    normalized = str(prefix).strip().upper()
+    if not normalized or not normalized.replace("_", "").isalnum():
+        raise ValueError("角色前缀无效")
+    values = {
+        "base_url": os.getenv(f"{normalized}_BASE_URL", "").strip(),
+        "api_key": os.getenv(f"{normalized}_API_KEY", "").strip(),
+        "model": os.getenv(f"{normalized}_MODEL", "").strip(),
+    }
+    missing = [name for name, value in values.items() if not value]
+    if missing:
+        names = ", ".join(f"{normalized}_{name.upper()}" for name in missing)
+        raise ValueError(f"缺少显式角色配置：{names}")
+    return values["base_url"], values["api_key"], values["model"]
+
+
+def ensure_roles_distinct(
+    generator_identity: tuple[str, str], reviewer_identity: tuple[str, str]
+) -> None:
+    """拒绝使用相同 endpoint/model 的 Generator 和 Reviewer。"""
+    def normalize_url(value: str) -> str:
+        """标准化服务地址，忽略首尾空白、末尾斜杠和大小写。"""
+        return str(value or "").strip().rstrip("/").lower()
+
+    def normalize_model(value: str) -> str:
+        """标准化模型名，忽略首尾空白和大小写。"""
+        return str(value or "").strip().lower()
+
+    if (normalize_url(generator_identity[0]), normalize_model(generator_identity[1])) == (
+        normalize_url(reviewer_identity[0]), normalize_model(reviewer_identity[1])
+    ):
+        raise ValueError("Generator 与 Reviewer 必须使用不同的 base_url + model")
+
+
 def is_role_configured(prefix):
     """用途：判断可选角色是否显式配置。
 
@@ -109,11 +147,13 @@ def build_client(base_url, api_key):
 
 
 def call_model(client, model, prompt, temperature, max_tokens,
-               before_attempt: Callable[[], None] | None = None):
+               before_attempt: Callable[[], None] | None = None,
+               response_format: dict | None = None):
     """用途：调用聊天模型并在临时错误时最多重试三次。
 
     输入：client、model、prompt、temperature、max_tokens；可选的
-        before_attempt 在每次真正请求（包括重试）前调用一次。
+        before_attempt 在每次真正请求（包括重试）前调用一次；response_format 可选，
+        用于把 OpenAI 兼容接口约束为 JSON Schema 结构化输出。
     输出：返回 (文本, 延迟秒数, token 总数, finish_reason)。
     运行前数据形态：输入是完整 Prompt 和已创建客户端。
     运行后数据变化：响应被规范化为四元组，content 为空时回退 reasoning_content。
@@ -128,12 +168,15 @@ def call_model(client, model, prompt, temperature, max_tokens,
             # 运行前：prompt 是拼好的提示词。
             start_time = time.time()
             # 运行后：resp 是接口返回的完整响应对象。
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            request = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if response_format is not None:
+                request["response_format"] = response_format
+            resp = client.chat.completions.create(**request)
             message = resp.choices[0].message
             finish_reason = resp.choices[0].finish_reason
             if finish_reason is None:

@@ -1,16 +1,158 @@
 {
-  "blueprint_id": "legal_v1_balanced_dimensions",
-  "target_total": 105,
-  "dimension_targets": {
-    "fact_extraction": 15,
-    "issue_identification": 10,
-    "rule_application": 25,
-    "evidence_evaluation": 15,
-    "judgment_prediction": 10,
-    "legal_argument": 10,
-    "amount_calculation": 5,
-    "compliance_refusal": 10,
-    "procedure_time_reasoning": 5
+  "blueprint_id": "legal_v2_300_dimensions_formats",
+  "version": "2.0.0",
+  "target_total": 300,
+  "dimension_quotas": {
+    "fact_extraction": 45,
+    "issue_identification": 30,
+    "rule_application": 60,
+    "evidence_evaluation": 45,
+    "judgment_prediction": 30,
+    "legal_argument": 30,
+    "amount_calculation": 15,
+    "compliance_refusal": 30,
+    "procedure_time_reasoning": 15
+  },
+  "question_format_quotas": {
+    "single_choice": 45,
+    "multiple_choice": 15,
+    "true_false": 10,
+    "numeric": 15,
+    "structured_extraction": 5,
+    "short_answer": 75,
+    "case_analysis": 90,
+    "legal_drafting": 15,
+    "compliance_response": 30
+  },
+  "dimension_format_quotas": {
+    "fact_extraction": {
+      "single_choice": 6,
+      "multiple_choice": 4,
+      "true_false": 0,
+      "numeric": 0,
+      "structured_extraction": 3,
+      "short_answer": 15,
+      "case_analysis": 17,
+      "legal_drafting": 0,
+      "compliance_response": 0
+    },
+    "issue_identification": {
+      "single_choice": 5,
+      "multiple_choice": 2,
+      "true_false": 3,
+      "numeric": 0,
+      "structured_extraction": 0,
+      "short_answer": 12,
+      "case_analysis": 8,
+      "legal_drafting": 0,
+      "compliance_response": 0
+    },
+    "rule_application": {
+      "single_choice": 10,
+      "multiple_choice": 4,
+      "true_false": 2,
+      "numeric": 0,
+      "structured_extraction": 2,
+      "short_answer": 18,
+      "case_analysis": 18,
+      "legal_drafting": 6,
+      "compliance_response": 0
+    },
+    "evidence_evaluation": {
+      "single_choice": 7,
+      "multiple_choice": 3,
+      "true_false": 2,
+      "numeric": 0,
+      "structured_extraction": 0,
+      "short_answer": 10,
+      "case_analysis": 23,
+      "legal_drafting": 0,
+      "compliance_response": 0
+    },
+    "judgment_prediction": {
+      "single_choice": 5,
+      "multiple_choice": 1,
+      "true_false": 2,
+      "numeric": 0,
+      "structured_extraction": 0,
+      "short_answer": 7,
+      "case_analysis": 14,
+      "legal_drafting": 1,
+      "compliance_response": 0
+    },
+    "legal_argument": {
+      "single_choice": 4,
+      "multiple_choice": 1,
+      "true_false": 1,
+      "numeric": 0,
+      "structured_extraction": 0,
+      "short_answer": 8,
+      "case_analysis": 8,
+      "legal_drafting": 8,
+      "compliance_response": 0
+    },
+    "amount_calculation": {
+      "single_choice": 3,
+      "multiple_choice": 0,
+      "true_false": 0,
+      "numeric": 12,
+      "structured_extraction": 0,
+      "short_answer": 0,
+      "case_analysis": 0,
+      "legal_drafting": 0,
+      "compliance_response": 0
+    },
+    "compliance_refusal": {
+      "single_choice": 0,
+      "multiple_choice": 0,
+      "true_false": 0,
+      "numeric": 0,
+      "structured_extraction": 0,
+      "short_answer": 0,
+      "case_analysis": 0,
+      "legal_drafting": 0,
+      "compliance_response": 30
+    },
+    "procedure_time_reasoning": {
+      "single_choice": 5,
+      "multiple_choice": 0,
+      "true_false": 0,
+      "numeric": 3,
+      "structured_extraction": 0,
+      "short_answer": 5,
+      "case_analysis": 2,
+      "legal_drafting": 0,
+      "compliance_response": 0
+    }
+  },
+  "difficulty_quotas": {
+    "easy": 60,
+    "medium": 150,
+    "hard": 90
+  },
+  "risk_quotas": {
+    "low": 150,
+    "medium": 105,
+    "high": 45
+  },
+  "tag_minimums": {
+    "long_context": 60,
+    "cross_section": 45,
+    "long_tail": 30,
+    "common_error": 60,
+    "edge_case": 30,
+    "high_risk": 45,
+    "adversarial": 30,
+    "hallucination_resistance": 30,
+    "distractor": 45,
+    "minimal_pair": 30,
+    "counterfactual": 30,
+    "incomplete_information": 30
+  },
+  "split_ratios": {
+    "dev": 0.2,
+    "calibration": 0.2,
+    "test": 0.6
   },
   "case_type_minimum_counts": {
     "合同、准合同纠纷": 1,
@@ -18,15 +160,5 @@
     "侵权责任纠纷": 1,
     "婚姻家庭、继承纠纷": 1,
     "物权纠纷": 1
-  },
-  "difficulty_distribution": {
-    "easy": 0.2,
-    "medium": 0.5,
-    "hard": 0.3
-  },
-  "risk_distribution": {
-    "low": 0.5,
-    "medium": 0.35,
-    "high": 0.15
   }
 }

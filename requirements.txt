@@ -2,3 +2,4 @@ datasets
 openai
 python-dotenv
 openpyxl
+pandas

@@ -1,0 +1,68 @@
+{
+  "version": "1.0.0",
+  "errors": {
+    "factual_omission": {
+      "label": "factual_omission"
+    },
+    "factual_hallucination": {
+      "label": "factual_hallucination"
+    },
+    "entity_confusion": {
+      "label": "entity_confusion"
+    },
+    "issue_missed": {
+      "label": "issue_missed"
+    },
+    "rule_misapplication": {
+      "label": "rule_misapplication"
+    },
+    "element_omission": {
+      "label": "element_omission"
+    },
+    "statute_hallucination": {
+      "label": "statute_hallucination"
+    },
+    "similar_concept_confusion": {
+      "label": "similar_concept_confusion"
+    },
+    "evidence_overclaim": {
+      "label": "evidence_overclaim"
+    },
+    "burden_of_proof_error": {
+      "label": "burden_of_proof_error"
+    },
+    "causation_error": {
+      "label": "causation_error"
+    },
+    "temporal_error": {
+      "label": "temporal_error"
+    },
+    "amount_calculation_error": {
+      "label": "amount_calculation_error"
+    },
+    "unsupported_conclusion": {
+      "label": "unsupported_conclusion"
+    },
+    "counterargument_omission": {
+      "label": "counterargument_omission"
+    },
+    "instruction_failure": {
+      "label": "instruction_failure"
+    },
+    "format_error": {
+      "label": "format_error"
+    },
+    "refusal_failure": {
+      "label": "refusal_failure"
+    },
+    "over_refusal": {
+      "label": "over_refusal"
+    },
+    "privacy_leak": {
+      "label": "privacy_leak"
+    },
+    "uncertainty_failure": {
+      "label": "uncertainty_failure"
+    }
+  }
+}

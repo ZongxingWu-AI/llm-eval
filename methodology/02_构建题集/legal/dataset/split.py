@@ -57,16 +57,46 @@ def _primary_category(row: dict[str, Any]) -> str:
     return str(value or "未分类")
 
 
-def assign_case_splits(rows: list[dict[str, Any]], seed: int = 20260824) -> list[dict[str, Any]]:
-    """用途：按 case_id 分组并按主分类分层分配 dev、calibration、test。
+def _split_counts(count: int, split_ratios: dict[str, float]) -> dict[str, int]:
+    """把案件数量按比例转换成整数 split 配额。"""
+    if count <= 0:
+        return {str(key): 0 for key in split_ratios}
+    cleaned = {str(key): max(0.0, float(value)) for key, value in split_ratios.items()}
+    total_ratio = sum(cleaned.values())
+    if total_ratio <= 0:
+        raise ValueError("split_ratios 至少需要一个正数比例")
+    raw = {key: count * value / total_ratio for key, value in cleaned.items()}
+    result = {key: int(value) for key, value in raw.items()}
+    remainder = count - sum(result.values())
+    ranked = sorted(
+        raw,
+        key=lambda key: (raw[key] - result[key], -list(raw).index(key)),
+        reverse=True,
+    )
+    for key in ranked[:remainder]:
+        result[key] += 1
+    return result
 
-    输入：rows 是案件或问题字典列表；seed 控制稳定随机顺序。
-    输出：返回逐行浅拷贝的新列表，每行新增或统一 split。
-    运行前数据形态：运行前同案多题尚无固定 split。
+
+def assign_case_splits(
+    rows: list[dict[str, Any]],
+    seed: int = 20260824,
+    split_ratios: dict[str, float] | None = None,
+) -> list[dict[str, Any]]:
+    """按案件分组并按主分类和比例分配 dev、calibration、test。
+
+    输入：rows 是案件或问题字典列表；seed 控制稳定随机顺序；split_ratios 控制案件级比例。
+    输出：返回逐行浅拷贝的新列表，每行新增或统一 split 字段。
+    运行前数据形态：运行前同案多题可能尚无固定 split。
     运行后数据变化：运行后同一 case_id 的全部题共享一个 split，固定 seed 可重复。
     副作用：只处理内存，不写文件、不调用模型，也不修改输入字典。
-    异常或失败处理：缺 case_id 的行会作为同一空标识组；小样本按比例回退，十案及以上按 3/2/其余分配。
-    最小示例：某分类十个案件会得到 3 dev、2 calibration、5 test。"""
+    异常或失败处理：缺 case_id 的行会作为同一空标识组；比例为空或全为零时抛出明确错误。
+    最小示例：十个案件按默认 20%/20%/60% 得到 2/2/6。"""
+    ratios = split_ratios or {"dev": 0.2, "calibration": 0.2, "test": 0.6}
+    if not isinstance(ratios, dict) or not ratios:
+        raise ValueError("split_ratios 必须是非空字典")
+    if any(float(value) < 0 for value in ratios.values()):
+        raise ValueError("split_ratios 不能包含负数")
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         groups[_case_id(row)].append(row)
@@ -77,33 +107,23 @@ def assign_case_splits(rows: list[dict[str, Any]], seed: int = 20260824) -> list
 
     rng = random.Random(seed)
     split_by_case: dict[str, str] = {}
+    split_names = tuple(str(key) for key in ratios)
     for category in sorted(category_cases):
         case_ids = sorted(category_cases[category])
         rng.shuffle(case_ids)
-        count = len(case_ids)
-        if count >= 10:
-            dev = 3
-            calibration = 2
-        elif count == 0:
-            dev = 0
-            calibration = 0
-        else:
-            dev = max(1, round(count * 0.3))
-            calibration = max(0, round(count * 0.2))
-            if dev + calibration >= count and count > 1:
-                calibration = max(0, count - dev - 1)
-        test = count - dev - calibration
-        counts = {"dev": dev, "calibration": calibration, "test": test}
+        counts = _split_counts(len(case_ids), {str(key): float(value) for key, value in ratios.items()})
         cursor = 0
-        for split in ("dev", "calibration", "test"):
-            for case_id in case_ids[cursor:cursor + counts[split]]:
+        for split in split_names:
+            size = counts.get(split, 0)
+            for case_id in case_ids[cursor:cursor + size]:
                 split_by_case[case_id] = split
-            cursor += counts[split]
+            cursor += size
 
+    fallback = split_names[0] if split_names else "dev"
     result: list[dict[str, Any]] = []
     for row in rows:
         copy = dict(row)
-        copy["split"] = split_by_case.get(_case_id(copy), "dev")
+        copy["split"] = split_by_case.get(_case_id(copy), fallback)
         result.append(copy)
     return result
 

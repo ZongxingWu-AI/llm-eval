@@ -1,12 +1,17 @@
 """法律结果评测流水线的契约测试。"""
 
 import importlib
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
+from core.data_io import write_jsonl
 
 _scoring_module = importlib.import_module("methodology.04_结果评测.legal.scoring.run")
 score_outputs = _scoring_module.score_outputs
 build_report = _scoring_module.build_report
+run = _scoring_module.run
 
 
 class LegalScoringPipelineTests(unittest.TestCase):
@@ -23,7 +28,6 @@ class LegalScoringPipelineTests(unittest.TestCase):
             "question_id": "q-rule",
             "case_id": "case-rule",
             "split": "test",
-            "primary_issue": "付款责任",
             "task_type": "规则适用",
             "dimension_id": "rule_application",
             "context_type": "self_contained",
@@ -158,6 +162,21 @@ class LegalScoringPipelineTests(unittest.TestCase):
             score_outputs([self.rule_question], [])
         with self.assertRaisesRegex(ValueError, "无法匹配.*question_id"):
             score_outputs([self.rule_question], [self._output("q-other", "卢某")])
+
+    def test_run_max_items_filters_raw_outputs_before_strict_matching(self):
+        """验证部分评分会先按题目 ID 过滤完整原始回答文件。"""
+        second = {**self.rule_question, "question_id": "q-rule-2", "case_id": "case-rule-2"}
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            questions_path = root / "release.jsonl"
+            outputs_path = root / "outputs.jsonl"
+            write_jsonl(questions_path, [self.rule_question, second])
+            write_jsonl(outputs_path, [
+                self._output("q-rule", "卢某应付款。"),
+                self._output("q-rule-2", "卢某应付款。"),
+            ])
+            results, _ = run(questions_path, outputs_path, root / "score", max_items=1)
+        self.assertEqual([row["question_id"] for row in results], ["q-rule"])
 
 
 if __name__ == "__main__":

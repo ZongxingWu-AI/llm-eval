@@ -28,7 +28,6 @@ EXPECTED_CONTEXT_TYPES = {"source_excerpt", "full_document", "self_contained", "
 REQUIRED_DIMENSION_FIELDS = {
     "dimension_id",
     "task_type",
-    "reasoning_capabilities",
     "applicable_case_types",
     "target_count",
     "context_types",
@@ -77,19 +76,20 @@ class LegalDimensionConfigTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             config.get_dimension("not_a_legal_dimension")
 
-    def test_taxonomy_contains_new_task_and_capability_without_removing_legacy_task(self):
+    def test_taxonomy_contains_expected_tasks(self):
         """执行法律评测测试。"""
         taxonomy = json.loads(TAXONOMY_PATH.read_text(encoding="utf-8"))
 
         self.assertIn("程序与时间推理", taxonomy["task_types"])
         self.assertIn("法律规则适用", taxonomy["task_types"])
         self.assertIn("争议焦点识别与规则适用", taxonomy["task_types"])
-        self.assertIn("时间推理", taxonomy["reasoning_capabilities"])
+        self.assertNotIn("reasoning_" + "capabilities", taxonomy)
 
     def test_question_schema_requires_dimension_context_and_traceable_evidence(self):
         """执行法律评测测试。"""
         schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
+        self.assertFalse(schema["additionalProperties"])
         self.assertTrue({"dimension_id", "context_type", "context"} <= set(schema["required"]))
         self.assertEqual(
             set(schema["properties"]["dimension_id"]["enum"]),
@@ -103,8 +103,16 @@ class LegalDimensionConfigTests(unittest.TestCase):
         self.assertEqual(evidence_schema["items"]["type"], "object")
         self.assertEqual(
             set(evidence_schema["items"]["required"]),
-            {"source_section", "source_quote"},
+            {"source_quote"},
         )
+
+    def test_dimensions_use_only_declared_fields(self):
+        """维度配置不再定义已删除的能力元数据。"""
+        config = importlib.import_module("methodology.02_构建题集.legal.config")
+        catalog = config.load_dimension_catalog()
+        for dimension in catalog["dimensions"]:
+            self.assertNotIn("reasoning_" + "capabilities", dimension)
+
 
 
 if __name__ == "__main__":

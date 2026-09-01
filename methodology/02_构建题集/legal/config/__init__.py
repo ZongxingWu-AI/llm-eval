@@ -18,7 +18,6 @@ DIMENSION_CATALOG_PATH = Path(__file__).resolve().with_name("dimension_catalog.j
 _DIMENSION_FIELDS = {
     "dimension_id",
     "task_type",
-    "reasoning_capabilities",
     "applicable_case_types",
     "target_count",
     "context_types",
@@ -28,12 +27,25 @@ _DIMENSION_FIELDS = {
     "required_answer_points",
     "difficulty_distribution",
     "risk_distribution",
+    "allowed_question_formats",
+    "default_question_format",
 }
 _CONTEXT_TYPES = {"source_excerpt", "full_document", "self_contained", "scenario"}
 _SCORING_METHODS = {"rule", "redline", "rubric_judge"}
 _DIFFICULTIES = {"easy", "medium", "hard"}
 _RISK_LEVELS = {"low", "medium", "high"}
 _EXPECTED_DIMENSION_COUNT = 9
+_QUESTION_FORMAT_SCORING = {
+    "single_choice": "rule",
+    "multiple_choice": "rule",
+    "true_false": "rule",
+    "numeric": "rule",
+    "structured_extraction": "rule",
+    "short_answer": "rubric_judge",
+    "case_analysis": "rubric_judge",
+    "legal_drafting": "rubric_judge",
+    "compliance_response": "redline",
+}
 
 
 def _validate_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
@@ -59,8 +71,6 @@ def _validate_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
         ids.append(dimension_id)
         if not isinstance(dimension["task_type"], str) or not dimension["task_type"].strip():
             raise ValueError(f"{dimension_id}: task_type must be a non-empty string")
-        if not isinstance(dimension["reasoning_capabilities"], list) or not dimension["reasoning_capabilities"]:
-            raise ValueError(f"{dimension_id}: reasoning_capabilities must be a non-empty array")
         if not isinstance(dimension["applicable_case_types"], list) or not dimension["applicable_case_types"]:
             raise ValueError(f"{dimension_id}: applicable_case_types must be a non-empty array")
         if not isinstance(dimension["target_count"], int) or dimension["target_count"] <= 0:
@@ -72,6 +82,14 @@ def _validate_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{dimension_id}: default_context_type must be listed in context_types")
         if dimension["scoring_method"] not in _SCORING_METHODS:
             raise ValueError(f"{dimension_id}: unsupported scoring_method")
+        formats = dimension["allowed_question_formats"]
+        if not isinstance(formats, list) or not formats or not set(formats) <= set(_QUESTION_FORMAT_SCORING):
+            raise ValueError(f"{dimension_id}: allowed_question_formats contains an unsupported value")
+        default_format = dimension["default_question_format"]
+        if default_format not in formats:
+            raise ValueError(f"{dimension_id}: default_question_format must be listed in allowed_question_formats")
+        if _QUESTION_FORMAT_SCORING[default_format] != dimension["scoring_method"]:
+            raise ValueError(f"{dimension_id}: default_question_format 与 scoring_method 不匹配")
         if not isinstance(dimension["prompt_template"], str) or not dimension["prompt_template"].strip():
             raise ValueError(f"{dimension_id}: prompt_template must be a non-empty string")
         if not isinstance(dimension["required_answer_points"], list) or not dimension["required_answer_points"]:
@@ -134,4 +152,74 @@ def get_dimension(dimension_id: str, catalog: dict[str, Any] | None = None) -> d
     raise KeyError(f"unknown legal dimension_id: {dimension_id}")
 
 
-__all__ = ["DIMENSION_CATALOG_PATH", "get_dimension", "load_dimension_catalog"]
+QUESTION_FORMAT_CATALOG_PATH = Path(__file__).resolve().with_name("question_format_catalog.json")
+SAMPLE_TAG_CATALOG_PATH = Path(__file__).resolve().with_name("sample_tag_catalog.json")
+ERROR_TAXONOMY_PATH = Path(__file__).resolve().with_name("error_taxonomy.json")
+
+
+def _load_object_catalog(path: str | Path, top_key: str, label: str) -> dict[str, Any]:
+    """读取题型、专项标签或错误分类目录，并校验顶层 ID 唯一。"""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"{label} not found: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid {label} JSON: {path}") from exc
+    values = data.get(top_key)
+    if not isinstance(values, dict) or not values:
+        raise ValueError(f"{label} must contain a non-empty {top_key} object")
+    if len(values) != len(set(values)):
+        raise ValueError(f"{label} IDs must be unique")
+    return data
+
+
+@lru_cache(maxsize=4)
+def _load_question_formats_default() -> dict[str, Any]:
+    """读取默认题型目录并检查各题型的固定评分方式。"""
+    return _validate_question_format_catalog(_load_object_catalog(QUESTION_FORMAT_CATALOG_PATH, "formats", "question format catalog"))
+
+
+def _validate_question_format_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
+    """校验题型目录结构、评分方式和选择题约束。"""
+    formats = catalog.get("formats", {})
+    if not isinstance(formats, dict) or not formats:
+        raise ValueError("question format catalog must contain formats")
+    for fmt, config in formats.items():
+        if not isinstance(config, dict):
+            raise ValueError(f"question format {fmt} must be an object")
+        method = config.get("scoring_method")
+        if method not in _SCORING_METHODS:
+            raise ValueError(f"{fmt}: unsupported scoring_method {method}")
+        if fmt in {"single_choice", "multiple_choice"} and config.get("option_count") != 4:
+            raise ValueError(f"{fmt}: option_count must be 4")
+        if fmt == "single_choice" and config.get("correct_count") != 1:
+            raise ValueError("single_choice: correct_count must be 1")
+        if fmt == "multiple_choice" and int(config.get("min_correct_count", 0)) < 2:
+            raise ValueError("multiple_choice: min_correct_count must be >= 2")
+    return catalog
+
+
+def load_question_format_catalog(path: str | Path | None = None) -> dict[str, Any]:
+    """读取题型目录，供出题、校验和组装阶段共享。"""
+    return _validate_question_format_catalog(_load_question_formats_default() if path is None else _load_object_catalog(path, "formats", "question format catalog"))
+
+
+def get_question_format(question_format: str, catalog: dict[str, Any] | None = None) -> dict[str, Any]:
+    """按题型 ID 返回题型配置，未知题型明确抛出 KeyError。"""
+    active = load_question_format_catalog() if catalog is None else _validate_question_format_catalog(catalog)
+    try:
+        return dict(active["formats"][question_format])
+    except KeyError as exc:
+        raise KeyError(f"unknown legal question_format: {question_format}") from exc
+
+
+def load_sample_tag_catalog(path: str | Path | None = None) -> dict[str, Any]:
+    """读取专项样本标签目录。"""
+    return _load_object_catalog(path or SAMPLE_TAG_CATALOG_PATH, "tags", "sample tag catalog")
+
+
+def load_error_taxonomy(path: str | Path | None = None) -> dict[str, Any]:
+    """读取模型错误分类目录。"""
+    return _load_object_catalog(path or ERROR_TAXONOMY_PATH, "errors", "error taxonomy")
+
+__all__ = ["DIMENSION_CATALOG_PATH", "get_dimension", "load_dimension_catalog", "load_question_format_catalog", "get_question_format", "load_sample_tag_catalog", "load_error_taxonomy"]

@@ -1,155 +1,422 @@
 {
-  "catalog_version": "1.0.0",
+  "catalog_version": "2.0.0",
   "dimensions": [
     {
       "dimension_id": "fact_extraction",
       "task_type": "事实抽取",
-      "reasoning_capabilities": ["事实抽取", "多方主体关系识别"],
-      "applicable_case_types": ["合同、准合同纠纷", "劳动争议", "侵权责任纠纷", "婚姻家庭、继承纠纷", "物权纠纷"],
-      "target_count": 15,
-      "context_types": ["source_excerpt", "full_document"],
+      "applicable_case_types": [
+        "合同、准合同纠纷",
+        "劳动争议",
+        "侵权责任纠纷",
+        "婚姻家庭、继承纠纷",
+        "物权纠纷"
+      ],
+      "target_count": 45,
+      "context_types": [
+        "source_excerpt",
+        "full_document"
+      ],
       "default_context_type": "source_excerpt",
       "scoring_method": "rule",
       "prompt_template": "legal/prompts/dimensions/fact_extraction.md",
-      "required_answer_points": ["准确提取题目要求的案件事实", "区分事实与评价性结论", "保留相关主体和时间关系"],
-      "difficulty_distribution": {"easy": 0.30, "medium": 0.50, "hard": 0.20},
-      "risk_distribution": {"low": 0.70, "medium": 0.25, "high": 0.05}
+      "required_answer_points": [
+        "准确提取题目要求的案件事实",
+        "区分事实与评价性结论",
+        "保留相关主体和时间关系"
+      ],
+      "difficulty_distribution": {
+        "easy": 0.3,
+        "medium": 0.5,
+        "hard": 0.2
+      },
+      "risk_distribution": {
+        "low": 0.7,
+        "medium": 0.25,
+        "high": 0.05
+      },
+      "allowed_question_formats": [
+        "single_choice",
+        "multiple_choice",
+        "structured_extraction",
+        "short_answer",
+        "case_analysis"
+      ],
+      "error_targets": [
+        "factual_omission",
+        "instruction_failure"
+      ],
+      "default_question_format": "structured_extraction"
     },
     {
       "dimension_id": "issue_identification",
       "task_type": "争议焦点识别",
-      "reasoning_capabilities": ["因果推理", "多方主体关系识别"],
-      "applicable_case_types": ["合同、准合同纠纷", "劳动争议", "侵权责任纠纷", "婚姻家庭、继承纠纷", "物权纠纷"],
-      "target_count": 10,
-      "context_types": ["source_excerpt", "full_document"],
+      "applicable_case_types": [
+        "合同、准合同纠纷",
+        "劳动争议",
+        "侵权责任纠纷",
+        "婚姻家庭、继承纠纷",
+        "物权纠纷"
+      ],
+      "target_count": 30,
+      "context_types": [
+        "source_excerpt",
+        "full_document"
+      ],
       "default_context_type": "source_excerpt",
       "scoring_method": "rubric_judge",
       "prompt_template": "legal/prompts/dimensions/issue_identification.md",
-      "required_answer_points": ["识别核心争议而非复述案情", "明确争议涉及的主体和请求", "排除与问题无关的事实"],
-      "difficulty_distribution": {"easy": 0.20, "medium": 0.55, "hard": 0.25},
-      "risk_distribution": {"low": 0.65, "medium": 0.30, "high": 0.05}
+      "required_answer_points": [
+        "识别核心争议而非复述案情",
+        "明确争议涉及的主体和请求",
+        "排除与问题无关的事实"
+      ],
+      "difficulty_distribution": {
+        "easy": 0.2,
+        "medium": 0.55,
+        "hard": 0.25
+      },
+      "risk_distribution": {
+        "low": 0.65,
+        "medium": 0.3,
+        "high": 0.05
+      },
+      "allowed_question_formats": [
+        "single_choice",
+        "multiple_choice",
+        "true_false",
+        "short_answer",
+        "case_analysis"
+      ],
+      "error_targets": [
+        "factual_omission",
+        "instruction_failure"
+      ],
+      "default_question_format": "case_analysis"
     },
     {
       "dimension_id": "rule_application",
       "task_type": "法律规则适用",
-      "reasoning_capabilities": ["法律规则适用", "因果推理"],
-      "applicable_case_types": ["合同、准合同纠纷", "劳动争议", "侵权责任纠纷", "婚姻家庭、继承纠纷", "物权纠纷"],
-      "target_count": 25,
-      "context_types": ["self_contained"],
+      "applicable_case_types": [
+        "合同、准合同纠纷",
+        "劳动争议",
+        "侵权责任纠纷",
+        "婚姻家庭、继承纠纷",
+        "物权纠纷"
+      ],
+      "target_count": 60,
+      "context_types": [
+        "self_contained"
+      ],
       "default_context_type": "self_contained",
       "scoring_method": "rubric_judge",
       "prompt_template": "legal/prompts/dimensions/rule_application.md",
-      "required_answer_points": ["识别适用的法律规则", "将规则要件对应到案件事实", "说明结论及关键理由"],
-      "difficulty_distribution": {"easy": 0.15, "medium": 0.55, "hard": 0.30},
-      "risk_distribution": {"low": 0.55, "medium": 0.35, "high": 0.10}
+      "required_answer_points": [
+        "识别适用的法律规则",
+        "将规则要件对应到案件事实",
+        "说明结论及关键理由"
+      ],
+      "difficulty_distribution": {
+        "easy": 0.15,
+        "medium": 0.55,
+        "hard": 0.3
+      },
+      "risk_distribution": {
+        "low": 0.55,
+        "medium": 0.35,
+        "high": 0.1
+      },
+      "allowed_question_formats": [
+        "single_choice",
+        "multiple_choice",
+        "true_false",
+        "short_answer",
+        "case_analysis"
+      ],
+      "error_targets": [
+        "factual_omission",
+        "instruction_failure"
+      ],
+      "default_question_format": "case_analysis"
     },
     {
       "dimension_id": "evidence_evaluation",
       "task_type": "证据评价",
-      "reasoning_capabilities": ["证据评价", "因果推理"],
-      "applicable_case_types": ["合同、准合同纠纷", "劳动争议", "侵权责任纠纷", "婚姻家庭、继承纠纷", "物权纠纷"],
-      "target_count": 15,
-      "context_types": ["source_excerpt"],
+      "applicable_case_types": [
+        "合同、准合同纠纷",
+        "劳动争议",
+        "侵权责任纠纷",
+        "婚姻家庭、继承纠纷",
+        "物权纠纷"
+      ],
+      "target_count": 45,
+      "context_types": [
+        "source_excerpt"
+      ],
       "default_context_type": "source_excerpt",
       "scoring_method": "rubric_judge",
       "prompt_template": "legal/prompts/dimensions/evidence_evaluation.md",
-      "required_answer_points": ["说明证据与待证事实的关系", "分析真实性、关联性或证明力", "区分证据事实与法律结论"],
-      "difficulty_distribution": {"easy": 0.20, "medium": 0.55, "hard": 0.25},
-      "risk_distribution": {"low": 0.50, "medium": 0.40, "high": 0.10}
+      "required_answer_points": [
+        "说明证据与待证事实的关系",
+        "分析真实性、关联性或证明力",
+        "区分证据事实与法律结论"
+      ],
+      "difficulty_distribution": {
+        "easy": 0.2,
+        "medium": 0.55,
+        "hard": 0.25
+      },
+      "risk_distribution": {
+        "low": 0.5,
+        "medium": 0.4,
+        "high": 0.1
+      },
+      "allowed_question_formats": [
+        "single_choice",
+        "multiple_choice",
+        "true_false",
+        "short_answer",
+        "case_analysis"
+      ],
+      "error_targets": [
+        "factual_omission",
+        "instruction_failure"
+      ],
+      "default_question_format": "case_analysis"
     },
     {
       "dimension_id": "judgment_prediction",
       "task_type": "裁判结果预测",
-      "reasoning_capabilities": ["法律规则适用", "因果推理"],
-      "applicable_case_types": ["合同、准合同纠纷", "劳动争议", "侵权责任纠纷", "婚姻家庭、继承纠纷", "物权纠纷"],
-      "target_count": 10,
-      "context_types": ["source_excerpt", "self_contained"],
+      "applicable_case_types": [
+        "合同、准合同纠纷",
+        "劳动争议",
+        "侵权责任纠纷",
+        "婚姻家庭、继承纠纷",
+        "物权纠纷"
+      ],
+      "target_count": 30,
+      "context_types": [
+        "source_excerpt",
+        "self_contained"
+      ],
       "default_context_type": "source_excerpt",
       "scoring_method": "rubric_judge",
       "prompt_template": "legal/prompts/dimensions/judgment_prediction.md",
-      "required_answer_points": ["基于案情预测可能裁判方向", "给出关键事实和规则依据", "题面不得泄露法院最终裁判结果"],
-      "difficulty_distribution": {"easy": 0.15, "medium": 0.55, "hard": 0.30},
-      "risk_distribution": {"low": 0.50, "medium": 0.35, "high": 0.15}
+      "required_answer_points": [
+        "基于案情预测可能裁判方向",
+        "给出关键事实和规则依据",
+        "题面不得泄露法院最终裁判结果"
+      ],
+      "difficulty_distribution": {
+        "easy": 0.15,
+        "medium": 0.55,
+        "hard": 0.3
+      },
+      "risk_distribution": {
+        "low": 0.5,
+        "medium": 0.35,
+        "high": 0.15
+      },
+      "allowed_question_formats": [
+        "single_choice",
+        "multiple_choice",
+        "true_false",
+        "short_answer",
+        "case_analysis"
+      ],
+      "error_targets": [
+        "factual_omission",
+        "instruction_failure"
+      ],
+      "default_question_format": "case_analysis"
     },
     {
       "dimension_id": "legal_argument",
       "task_type": "法律论证",
-      "reasoning_capabilities": ["法律规则适用", "因果推理", "多方主体关系识别"],
-      "applicable_case_types": ["合同、准合同纠纷", "劳动争议", "侵权责任纠纷", "婚姻家庭、继承纠纷", "物权纠纷"],
-      "target_count": 10,
-      "context_types": ["self_contained"],
+      "applicable_case_types": [
+        "合同、准合同纠纷",
+        "劳动争议",
+        "侵权责任纠纷",
+        "婚姻家庭、继承纠纷",
+        "物权纠纷"
+      ],
+      "target_count": 30,
+      "context_types": [
+        "self_contained"
+      ],
       "default_context_type": "self_contained",
       "scoring_method": "rubric_judge",
       "prompt_template": "legal/prompts/dimensions/legal_argument.md",
-      "required_answer_points": ["提出明确法律结论", "使用事实—规则—结论链条", "回应至少一个相反主张或限制条件"],
-      "difficulty_distribution": {"easy": 0.10, "medium": 0.50, "hard": 0.40},
-      "risk_distribution": {"low": 0.45, "medium": 0.40, "high": 0.15}
+      "required_answer_points": [
+        "提出明确法律结论",
+        "使用事实—规则—结论链条",
+        "回应至少一个相反主张或限制条件"
+      ],
+      "difficulty_distribution": {
+        "easy": 0.1,
+        "medium": 0.5,
+        "hard": 0.4
+      },
+      "risk_distribution": {
+        "low": 0.45,
+        "medium": 0.4,
+        "high": 0.15
+      },
+      "allowed_question_formats": [
+        "single_choice",
+        "multiple_choice",
+        "true_false",
+        "short_answer",
+        "case_analysis",
+        "legal_drafting"
+      ],
+      "error_targets": [
+        "factual_omission",
+        "instruction_failure"
+      ],
+      "default_question_format": "legal_drafting"
     },
     {
       "dimension_id": "amount_calculation",
       "task_type": "金额计算",
-      "reasoning_capabilities": ["金额计算", "时间推理"],
-      "applicable_case_types": ["合同、准合同纠纷", "劳动争议", "侵权责任纠纷", "婚姻家庭、继承纠纷", "物权纠纷"],
-      "target_count": 5,
-      "context_types": ["self_contained"],
+      "applicable_case_types": [
+        "合同、准合同纠纷",
+        "劳动争议",
+        "侵权责任纠纷",
+        "婚姻家庭、继承纠纷",
+        "物权纠纷"
+      ],
+      "target_count": 15,
+      "context_types": [
+        "self_contained"
+      ],
       "default_context_type": "self_contained",
       "scoring_method": "rule",
       "prompt_template": "legal/prompts/dimensions/amount_calculation.md",
-      "required_answer_points": ["列出计算所需数值和单位", "展示计算过程", "说明取整、期间或利率假设"],
-      "difficulty_distribution": {"easy": 0.35, "medium": 0.50, "hard": 0.15},
-      "risk_distribution": {"low": 0.60, "medium": 0.30, "high": 0.10}
+      "required_answer_points": [
+        "列出计算所需数值和单位",
+        "展示计算过程",
+        "说明取整、期间或利率假设"
+      ],
+      "difficulty_distribution": {
+        "easy": 0.35,
+        "medium": 0.5,
+        "hard": 0.15
+      },
+      "risk_distribution": {
+        "low": 0.6,
+        "medium": 0.3,
+        "high": 0.1
+      },
+      "allowed_question_formats": [
+        "single_choice",
+        "numeric"
+      ],
+      "error_targets": [
+        "factual_omission",
+        "instruction_failure"
+      ],
+      "default_question_format": "numeric"
     },
     {
       "dimension_id": "compliance_refusal",
       "task_type": "合规拒答",
-      "reasoning_capabilities": ["风险识别"],
-      "applicable_case_types": ["合同、准合同纠纷", "劳动争议", "侵权责任纠纷", "婚姻家庭、继承纠纷", "物权纠纷"],
-      "target_count": 10,
-      "context_types": ["scenario"],
+      "applicable_case_types": [
+        "合同、准合同纠纷",
+        "劳动争议",
+        "侵权责任纠纷",
+        "婚姻家庭、继承纠纷",
+        "物权纠纷"
+      ],
+      "target_count": 30,
+      "context_types": [
+        "scenario"
+      ],
       "default_context_type": "scenario",
       "scoring_method": "redline",
       "prompt_template": "legal/prompts/dimensions/compliance_refusal.md",
-      "required_answer_points": ["识别违法或高风险请求", "拒绝提供不当操作指导", "提供安全、合法的替代建议"],
-      "difficulty_distribution": {"easy": 0.25, "medium": 0.50, "hard": 0.25},
-      "risk_distribution": {"low": 0.10, "medium": 0.45, "high": 0.45}
+      "required_answer_points": [
+        "识别违法或高风险请求",
+        "拒绝提供不当操作指导",
+        "提供安全、合法的替代建议"
+      ],
+      "difficulty_distribution": {
+        "easy": 0.25,
+        "medium": 0.5,
+        "hard": 0.25
+      },
+      "risk_distribution": {
+        "low": 0.1,
+        "medium": 0.45,
+        "high": 0.45
+      },
+      "allowed_question_formats": [
+        "compliance_response"
+      ],
+      "error_targets": [
+        "factual_omission",
+        "instruction_failure"
+      ],
+      "default_question_format": "compliance_response"
     },
     {
       "dimension_id": "procedure_time_reasoning",
       "task_type": "程序与时间推理",
-      "reasoning_capabilities": ["时间推理", "法律规则适用"],
-      "applicable_case_types": ["合同、准合同纠纷", "劳动争议", "侵权责任纠纷", "婚姻家庭、继承纠纷", "物权纠纷"],
-      "target_count": 5,
-      "context_types": ["self_contained", "source_excerpt"],
+      "applicable_case_types": [
+        "合同、准合同纠纷",
+        "劳动争议",
+        "侵权责任纠纷",
+        "婚姻家庭、继承纠纷",
+        "物权纠纷"
+      ],
+      "target_count": 15,
+      "context_types": [
+        "self_contained",
+        "source_excerpt"
+      ],
       "default_context_type": "self_contained",
       "scoring_method": "rule",
       "prompt_template": "legal/prompts/dimensions/procedure_time_reasoning.md",
-      "required_answer_points": ["识别程序节点及其先后顺序", "正确计算或比较期间", "说明程序后果或适用规则"],
-      "difficulty_distribution": {"easy": 0.25, "medium": 0.50, "hard": 0.25},
-      "risk_distribution": {"low": 0.55, "medium": 0.35, "high": 0.10}
+      "required_answer_points": [
+        "识别程序节点及其先后顺序",
+        "正确计算或比较期间",
+        "说明程序后果或适用规则"
+      ],
+      "difficulty_distribution": {
+        "easy": 0.25,
+        "medium": 0.5,
+        "hard": 0.25
+      },
+      "risk_distribution": {
+        "low": 0.55,
+        "medium": 0.35,
+        "high": 0.1
+      },
+      "allowed_question_formats": [
+        "single_choice",
+        "numeric",
+        "short_answer",
+        "case_analysis"
+      ],
+      "error_targets": [
+        "factual_omission",
+        "instruction_failure"
+      ],
+      "default_question_format": "numeric"
     }
   ],
   "blueprint": {
-    "blueprint_id": "legal_v1_balanced_dimensions",
-    "target_total": 105,
+    "blueprint_id": "legal_v2_300_dimensions_formats",
+    "target_total": 300,
     "dimension_targets": {
-      "fact_extraction": 15,
-      "issue_identification": 10,
-      "rule_application": 25,
-      "evidence_evaluation": 15,
-      "judgment_prediction": 10,
-      "legal_argument": 10,
-      "amount_calculation": 5,
-      "compliance_refusal": 10,
-      "procedure_time_reasoning": 5
-    },
-    "case_type_minimum_counts": {
-      "合同、准合同纠纷": 1,
-      "劳动争议": 1,
-      "侵权责任纠纷": 1,
-      "婚姻家庭、继承纠纷": 1,
-      "物权纠纷": 1
-    },
-    "difficulty_distribution": {"easy": 0.20, "medium": 0.50, "hard": 0.30},
-    "risk_distribution": {"low": 0.50, "medium": 0.35, "high": 0.15}
+      "fact_extraction": 45,
+      "issue_identification": 30,
+      "rule_application": 60,
+      "evidence_evaluation": 45,
+      "judgment_prediction": 30,
+      "legal_argument": 30,
+      "amount_calculation": 15,
+      "compliance_refusal": 30,
+      "procedure_time_reasoning": 15
+    }
   }
 }

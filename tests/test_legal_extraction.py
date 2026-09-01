@@ -15,45 +15,91 @@ _extract = importlib.import_module("methodology.01_造Benchmark.legal.extraction
 
 
 class LegalExtractionMetadataTests(unittest.TestCase):
+    def test_fact_item_has_current_output_fields(self):
+        """事实条目输出只包含当前接口字段。"""
+        item = _extract._fact_item("甲已交货", "甲已交货")
+        self.assertEqual(set(item), {"text", "source_quote", "source_quote_sha256"})
+
     def test_deterministic_extract_builds_grounded_full_case_fact_map(self):
         """规则提取必须覆盖全文章节，并让每个事实地图条目可回查原文。"""
         case = {
             "case_id": "case_fact_map",
             "full_text": ("原告：甲公司。被告：乙公司。诉讼请求：支付货款十万元。被告辩称货物存在质量问题。经审理查明双方于2025年1月1日签订合同。原告提交送货单证明已经交货。本院认为送货单真实，应予采信。《民法典》第五百零九条应予适用。判决乙公司支付货款十万元。如不服本判决，可在十五日内上诉。"),
-            "sections": {
-                "header": "原告：甲公司。被告：乙公司。",
-                "claims": "诉讼请求：支付货款十万元。",
-                "defenses": "被告辩称货物存在质量问题。",
-                "facts": "经审理查明双方于2025年1月1日签订合同。",
-                "evidence": "原告提交送货单证明已经交货。",
-                "court_reasoning": "本院认为送货单真实，应予采信。《民法典》第五百零九条应予适用。",
-                "judgment": "判决乙公司支付货款十万元。",
-                "tail": "如不服本判决，可在十五日内上诉。",
-            },
+            "external_text": ("原告：甲公司。被告：乙公司。诉讼请求：支付货款十万元。被告辩称货物存在质量问题。经审理查明双方于2025年1月1日签订合同。原告提交送货单证明已经交货。本院认为送货单真实，应予采信。《民法典》第五百零九条应予适用。判决乙公司支付货款十万元。如不服本判决，可在十五日内上诉。"),
             "parties": [{"role": "原告", "name": "甲公司"}, {"role": "被告", "name": "乙公司"}],
         }
         extracted = _extract.deterministic_extract(case)
-        self.assertIn("legal_issues", extracted)
-        self.assertIn("evidence_findings", extracted)
-        self.assertIn("conclusions", extracted)
         fact_map = extracted["case_fact_map"]
-        expected_groups = {"key_facts", "party_relationships", "claims", "defenses", "evidence", "court_found_facts", "procedural_timeline", "applied_laws", "court_reasoning", "judgment_results"}
+        expected_groups = {"key_facts", "party_relationships", "claims", "defenses", "disputed_issues", "evidence", "court_found_facts", "procedural_timeline", "applied_laws", "court_reasoning", "judgment_results"}
         self.assertEqual(set(fact_map), expected_groups)
         for group in ("key_facts", "claims", "defenses", "evidence", "applied_laws", "judgment_results", "procedural_timeline"):
             self.assertTrue(fact_map[group])
         for entries in fact_map.values():
             for entry in entries:
-                self.assertEqual(set(entry), {"text", "source_section", "source_quote"})
-                self.assertIn(entry["source_quote"], case["sections"][entry["source_section"]])
+                self.assertEqual(set(entry), {"text", "source_quote", "source_quote_sha256"})
+                self.assertIn(entry["source_quote"], case["external_text"])
 
-    def test_extract_case_keeps_fact_map_when_llm_returns_legacy_fields_only(self):
-        """旧版模型只返回三组字段时，新的全文事实地图也不能被覆盖丢失。"""
-        case = {"case_id": "case_legacy_llm", "full_text": "经审理查明甲已交货。本院认为乙应付款。判决乙支付货款。", "sections": {"facts": "经审理查明甲已交货。", "court_reasoning": "本院认为乙应付款。", "judgment": "判决乙支付货款。"}}
-        candidate = {"legal_issues": ["付款责任"], "evidence_findings": [], "conclusions": [{"conclusion": "乙支付货款", "source_section": "judgment", "source_quote": "判决乙支付货款。"}]}
-        with patch.object(_extract.llm_client, "call_model", return_value=(json.dumps(candidate), 0, 0, "stop")), patch.object(_extract, "load_template", return_value="{{case_sections}}"):
+    def test_llm_quote_is_verified_against_external_text_and_hashed_locally(self):
+        """模型只返回 text/source_quote 时，引用必须直接命中脱敏全文且由本地生成哈希。"""
+        case = {"case_id": "case_llm_grounded", "external_text": "原告提交合同，乙方未付款。"}
+        candidate_map = {group: [] for group in _extract.FACT_MAP_GROUPS}
+        candidate_map["evidence"] = [{"text": "原告提交了合同", "source_quote": "原告提交合同"}]
+        with patch.object(
+            _extract.llm_client,
+            "call_model",
+            return_value=(json.dumps({"case_fact_map": candidate_map}, ensure_ascii=False), 0, 0, "stop"),
+        ), patch.object(_extract, "load_template", return_value="{{external_text}}"):
             result = _extract.extract_case(case, client=object(), model="model")
-        self.assertEqual(result["legal_extraction"]["legal_issues"], ["付款责任"])
-        self.assertTrue(result["legal_extraction"]["case_fact_map"]["key_facts"])
+
+        entry = result["legal_extraction"]["case_fact_map"]["evidence"][0]
+        self.assertEqual(set(entry), {"text", "source_quote", "source_quote_sha256"})
+        self.assertEqual(
+            entry["source_quote_sha256"],
+            _extract.hashlib.sha256("原告提交合同".encode("utf-8")).hexdigest(),
+        )
+        self.assertEqual(result["quality"]["extraction"]["method"], "llm_grounded")
+
+    def test_llm_unknown_entry_fields_are_rejected_generically(self):
+        """当前事实条目包含未定义字段时，使用通用结构错误并回退规则结果。"""
+        case = {"case_id": "case_unknown_field", "external_text": "原告提交合同。"}
+        candidate_map = {group: [] for group in _extract.FACT_MAP_GROUPS}
+        candidate_map["evidence"] = [{
+            "text": "原告提交合同",
+            "source_quote": "原告提交合同。",
+            "extra_note": "不属于当前接口",
+        }]
+        with patch.object(
+            _extract.llm_client,
+            "call_model",
+            return_value=(json.dumps({"case_fact_map": candidate_map}, ensure_ascii=False), 0, 0, "stop"),
+        ), patch.object(_extract, "load_template", return_value="{{external_text}}"):
+            result = _extract.extract_case(case, client=object(), model="model")
+
+        self.assertEqual(result["quality"]["extraction"]["method"], "rules_fallback")
+        errors = result["quality"]["extraction"]["errors"]
+        self.assertTrue(any("包含未定义字段" in error for error in errors))
+        self.assertFalse(any("extra_note" in error for error in errors))
+    def test_llm_quote_must_exist_in_external_text(self):
+        """案件附带的其他材料不能绕过 external_text 的唯一来源校验。"""
+        case = {
+            "case_id": "case_untrusted_material",
+            "external_text": "脱敏全文中没有这句。",
+            "untrusted_material": "其他材料：乙方应付款。",
+        }
+        candidate_map = {group: [] for group in _extract.FACT_MAP_GROUPS}
+        candidate_map["judgment_results"] = [{
+            "text": "乙方应付款",
+            "source_quote": "其他材料：乙方应付款。",
+        }]
+        with patch.object(
+            _extract.llm_client,
+            "call_model",
+            return_value=(json.dumps({"case_fact_map": candidate_map}, ensure_ascii=False), 0, 0, "stop"),
+        ), patch.object(_extract, "load_template", return_value="{{external_text}}"):
+            result = _extract.extract_case(case, client=object(), model="model")
+
+        self.assertEqual(result["quality"]["extraction"]["method"], "rules_fallback")
+        self.assertTrue(any("脱敏全文" in error for error in result["quality"]["extraction"]["errors"]))
 
     def _run_with_methods(self, methods, **run_kwargs):
         """在临时 JSONL 上模拟不同逐案提取方法并读取批次 metadata。"""
@@ -85,21 +131,21 @@ class LegalExtractionMetadataTests(unittest.TestCase):
 
     def test_metadata_uses_actual_rules_result_even_when_llm_requested(self):
         """验证请求模型但逐案规则降级时，批次 metadata 如实记录规则方法。"""
-        _, metadata = self._run_with_methods(["rules"], workers=1)
-        self.assertEqual(metadata["method"], "rules")
-        self.assertEqual(metadata["method_counts"], {"rules": 1, "llm_grounded": 0})
+        _, metadata = self._run_with_methods(["rules_fallback"], workers=1)
+        self.assertEqual(metadata["method"], "rules_fallback")
+        self.assertEqual(metadata["method_counts"], {"rules_fallback": 1, "llm_grounded": 0})
 
     def test_metadata_reports_all_llm_results(self):
         """验证全部案件由模型成功提取时，批次 metadata 记录模型方法。"""
         _, metadata = self._run_with_methods(["llm_grounded", "llm_grounded"], workers=1)
         self.assertEqual(metadata["method"], "llm_grounded")
-        self.assertEqual(metadata["method_counts"], {"rules": 0, "llm_grounded": 2})
+        self.assertEqual(metadata["method_counts"], {"rules_fallback": 0, "llm_grounded": 2})
 
     def test_metadata_reports_mixed_results(self):
         """验证同一批次混合模型和规则结果时，批次 metadata 记录 mixed。"""
-        _, metadata = self._run_with_methods(["rules", "llm_grounded", "rules"], workers=1)
+        _, metadata = self._run_with_methods(["rules_fallback", "llm_grounded", "rules_fallback"], workers=1)
         self.assertEqual(metadata["method"], "mixed")
-        self.assertEqual(metadata["method_counts"], {"rules": 2, "llm_grounded": 1})
+        self.assertEqual(metadata["method_counts"], {"rules_fallback": 2, "llm_grounded": 1})
 
     def test_llm_runs_in_parallel_and_preserves_input_order(self):
         """验证 LLM 批处理并发执行，但输出仍保持输入顺序。"""
@@ -170,7 +216,7 @@ class LegalExtractionMetadataTests(unittest.TestCase):
             root = Path(tmp)
             input_path = root / "input.jsonl"
             output_path = root / "output.jsonl"
-            rows = [{"case_id": f"case_{i}", "sections": {}} for i in range(3)]
+            rows = [{"case_id": f"case_{i}", "external_text": ""} for i in range(3)]
             input_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
 
             def fake_extract(case, client=None, model="", **kwargs):
@@ -187,7 +233,7 @@ class LegalExtractionMetadataTests(unittest.TestCase):
 
             self.assertEqual(len(results), 3)
             failed = results[1]
-            self.assertEqual(failed["quality"]["extraction"]["method"], "rules")
+            self.assertEqual(failed["quality"]["extraction"]["method"], "rules_fallback")
             self.assertTrue(failed["quality"]["extraction"]["errors"])
 
     def test_invalid_concurrency_arguments_are_rejected(self):
@@ -208,7 +254,7 @@ class LegalExtractionMetadataTests(unittest.TestCase):
             root = Path(tmp)
             input_path = root / "input.jsonl"
             output_path = root / "output.jsonl"
-            input_path.write_text(json.dumps({"case_id": "case_0", "sections": {}}) + "\n", encoding="utf-8")
+            input_path.write_text(json.dumps({"case_id": "case_0", "external_text": ""}) + "\n", encoding="utf-8")
             with patch.object(_extract, "ThreadPoolExecutor") as executor:
                 _extract.run(input_path, output_path, use_llm=False)
             executor.assert_not_called()
@@ -224,7 +270,7 @@ class LegalExtractionMetadataTests(unittest.TestCase):
 
     def test_metadata_records_concurrency_settings(self):
         """验证运行 metadata 保存实际 workers 和 qps。"""
-        _, metadata = self._run_with_methods(["rules"], workers=2, qps=3.5)
+        _, metadata = self._run_with_methods(["rules_fallback"], workers=2, qps=3.5)
         self.assertEqual(metadata["workers"], 2)
         self.assertEqual(metadata["qps"], 3.5)
 
@@ -233,24 +279,14 @@ class LegalExtractionMetadataTests(unittest.TestCase):
         """验证模型引用无法回查时保留规则结果并标记 rules。"""
         case = {
             "case_id": "case_0",
-            "sections": {
-                "court_reasoning": "关于付款责任。证据不足。",
-                "judgment": "判决：驳回诉讼请求。",
-            },
+            "external_text": "关于付款责任。证据不足。判决：驳回诉讼请求。",
         }
-        candidate = {
-            "legal_issues": ["模型无法回查的争议"],
-            "evidence_findings": [{
-                "conclusion": "模型证据判断",
-                "source_section": "court_reasoning",
-                "source_quote": "不存在的证据原文",
-            }],
-            "conclusions": [{
-                "conclusion": "模型裁判结论",
-                "source_section": "judgment",
-                "source_quote": "不存在的判决原文",
-            }],
-        }
+        candidate_map = {group: [] for group in _extract.FACT_MAP_GROUPS}
+        candidate_map["evidence"] = [{
+            "text": "模型证据判断",
+            "source_quote": "不存在的证据原文",
+        }]
+        candidate = {"case_fact_map": candidate_map}
         with patch.object(_extract.llm_client, "call_model", return_value=(json.dumps(candidate), 0, 0, "stop")), \
              patch.object(_extract, "load_template", return_value="template"), \
              patch.object(_extract, "render", return_value="prompt"):
@@ -258,7 +294,7 @@ class LegalExtractionMetadataTests(unittest.TestCase):
 
         expected = _extract.deterministic_extract(case)
         self.assertEqual(result["legal_extraction"], expected)
-        self.assertEqual(result["quality"]["extraction"]["method"], "rules")
+        self.assertEqual(result["quality"]["extraction"]["method"], "rules_fallback")
         self.assertTrue(result["quality"]["extraction"]["errors"])
 
 class LLMClientHookTests(unittest.TestCase):
@@ -292,4 +328,3 @@ class LLMClientHookTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

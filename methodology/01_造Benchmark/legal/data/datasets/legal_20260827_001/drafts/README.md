@@ -6,9 +6,9 @@
 
 ## 按题目 schema 对照字段
 
-题目结构以 `legal/schemas/question.schema.json` 为准。`question_id`、`case_id`、`split` 是身份和划分字段；`case_classification`、`primary_issue`、`task_type`、`reasoning_capabilities`、`answer_type`、`scoring_method`、`difficulty`、`risk_level` 定义案件、任务和评测属性；`question`、`reference_answer`、`rubric`、`source_evidence` 是题面、参考答案、评分标准和证据定位。
+题目结构以 `legal/schemas/question.schema.json` 为准。`question_id`、`case_id`、`split` 是身份和划分字段；`case_classification`、`task_type`、`answer_type`、`scoring_method`、`difficulty`、`risk_level` 定义案件、任务和评测属性；`question`、`reference_answer`、`rubric`、`source_evidence` 是题面、参考答案、评分标准和证据定位。
 
-其中 taxonomy 主要约束可统计、可复用的受控取值；案件事实、题面、答案和证据引用必须回到 extract 或原文，不可凭空补写。`source_evidence` 通常逐条包含 `source_section` 和 `source_quote`，用于回查案件章节。
+其中 taxonomy 主要约束可统计、可复用的受控取值；案件事实、题面、答案和证据引用必须回到 extract 或原文，不可凭空补写。`source_evidence` 逐条包含 `source_quote`，并可包含由本地程序生成的 `source_quote_sha256`；引用直接在脱敏全文 `external_text` 中逐字回查。
 
 ## 状态区别
 

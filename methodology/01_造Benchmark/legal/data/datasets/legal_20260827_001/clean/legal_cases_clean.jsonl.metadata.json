@@ -1,11 +1,10 @@
 {
   "track": "legal_benchmark.ingestion",
-  "started_at": "2026-08-27T00:00:00+08:00",
+  "started_at": "2026-09-01T10:15:21.302688+00:00",
   "input": "C:\\llm-eval\\methodology\\01_造Benchmark\\legal\\data\\datasets\\legal_20260827_001\\raw",
   "output": "C:\\llm-eval\\methodology\\01_造Benchmark\\legal\\data\\datasets\\legal_20260827_001\\clean\\legal_cases_clean.jsonl",
   "manifest_output": "C:\\llm-eval\\methodology\\01_造Benchmark\\legal\\data\\datasets\\legal_20260827_001\\manifests\\legal_sources.jsonl",
   "count": 50,
   "method": "rules",
-  "parser_version": "legal-parser-v3",
-  "status": "migrated_existing_artifact"
+  "parser_version": "legal-parser-v4"
 }

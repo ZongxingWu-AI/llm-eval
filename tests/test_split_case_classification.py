@@ -34,7 +34,7 @@ class SplitCaseClassificationTests(unittest.TestCase):
                 split: sum(1 for row in result if row["case_classification"]["primary_category"] == category and row["split"] == split)
                 for split in ("dev", "calibration", "test")
             }
-            self.assertEqual(counts, {"dev": 3, "calibration": 2, "test": 5})
+            self.assertEqual(counts, {"dev": 2, "calibration": 2, "test": 6})
 
 
 if __name__ == "__main__":

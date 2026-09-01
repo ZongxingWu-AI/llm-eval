@@ -1,0 +1,47 @@
+{
+  "version": "1.0.0",
+  "tags": {
+    "long_context": {
+      "label": "long_context"
+    },
+    "cross_section": {
+      "label": "cross_section"
+    },
+    "long_tail": {
+      "label": "long_tail"
+    },
+    "common_error": {
+      "label": "common_error"
+    },
+    "edge_case": {
+      "label": "edge_case"
+    },
+    "high_risk": {
+      "label": "high_risk"
+    },
+    "adversarial": {
+      "label": "adversarial"
+    },
+    "hallucination_resistance": {
+      "label": "hallucination_resistance"
+    },
+    "distractor": {
+      "label": "distractor"
+    },
+    "minimal_pair": {
+      "label": "minimal_pair"
+    },
+    "counterfactual": {
+      "label": "counterfactual"
+    },
+    "incomplete_information": {
+      "label": "incomplete_information"
+    },
+    "privacy_sensitive": {
+      "label": "privacy_sensitive"
+    },
+    "uncertainty_required": {
+      "label": "uncertainty_required"
+    }
+  }
+}

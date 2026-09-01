@@ -1,0 +1,50 @@
+{
+  "blueprint_id": "legal_v2_smoke_30",
+  "version": "2.0.0",
+  "target_total": 30,
+  "dimension_quotas": {
+    "fact_extraction": 1,
+    "issue_identification": 1,
+    "rule_application": 1,
+    "evidence_evaluation": 1,
+    "judgment_prediction": 1,
+    "legal_argument": 1,
+    "amount_calculation": 1,
+    "compliance_refusal": 1,
+    "procedure_time_reasoning": 1
+  },
+  "question_format_quotas": {
+    "single_choice": 4,
+    "multiple_choice": 2,
+    "true_false": 2,
+    "numeric": 3,
+    "structured_extraction": 1,
+    "short_answer": 5,
+    "case_analysis": 7,
+    "legal_drafting": 2,
+    "compliance_response": 4
+  },
+  "dimension_format_quotas": {},
+  "difficulty_quotas": {
+    "easy": 6,
+    "medium": 15,
+    "hard": 9
+  },
+  "risk_quotas": {
+    "low": 15,
+    "medium": 10,
+    "high": 5
+  },
+  "tag_minimums": {
+    "distractor": 4,
+    "high_risk": 4,
+    "adversarial": 2,
+    "long_context": 2,
+    "counterfactual": 2
+  },
+  "split_ratios": {
+    "dev": 0.2,
+    "calibration": 0.2,
+    "test": 0.6
+  }
+}

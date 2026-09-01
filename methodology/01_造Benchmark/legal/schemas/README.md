@@ -20,9 +20,7 @@ question.schema.json
 | `case_id` | 案件编号，用于案件级 split。 |
 | `split` | `dev`、`calibration` 或 `test`。 |
 | `case_classification` | 案件级 taxonomy 信息。 |
-| `primary_issue` | 主要争议焦点。 |
 | `task_type` | 题目任务类型。 |
-| `reasoning_capabilities` | 推理能力标签数组。 |
 | `answer_type` | 预期答案形式。 |
 | `scoring_method` | 评分方式。 |
 | `difficulty` | 难度。 |
@@ -34,7 +32,7 @@ question.schema.json
 ## 4. 示例
 
 ```json
-{"question_id":"legal_0001_01","case_id":"case_0001","split":"dev","source_evidence":[{"source_section":"facts","source_quote":"..."}]}
+{"question_id":"legal_0001_01","case_id":"case_0001","split":"dev","source_evidence":[{"source_quote":"...","source_quote_sha256":"..."}]}
 ```
 
 ## 5. 上游和下游

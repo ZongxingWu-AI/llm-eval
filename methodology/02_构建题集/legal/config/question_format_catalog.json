@@ -1,0 +1,63 @@
+{
+  "version": "1.0.0",
+  "formats": {
+    "single_choice": {
+      "label": "单选题",
+      "answer_type": "选项",
+      "scoring_method": "rule",
+      "objective": true,
+      "option_count": 4,
+      "correct_count": 1
+    },
+    "multiple_choice": {
+      "label": "多选题",
+      "answer_type": "选项集合",
+      "scoring_method": "rule",
+      "objective": true,
+      "option_count": 4,
+      "min_correct_count": 2
+    },
+    "true_false": {
+      "label": "判断题",
+      "answer_type": "判断",
+      "scoring_method": "rule",
+      "objective": true
+    },
+    "numeric": {
+      "label": "数值/金额计算题",
+      "answer_type": "金额",
+      "scoring_method": "rule",
+      "objective": true
+    },
+    "structured_extraction": {
+      "label": "结构化抽取题",
+      "answer_type": "结构化数据",
+      "scoring_method": "rule",
+      "objective": true
+    },
+    "short_answer": {
+      "label": "简答题",
+      "answer_type": "结构化论述",
+      "scoring_method": "rubric_judge",
+      "objective": false
+    },
+    "case_analysis": {
+      "label": "案例分析题",
+      "answer_type": "结构化论述",
+      "scoring_method": "rubric_judge",
+      "objective": false
+    },
+    "legal_drafting": {
+      "label": "法律文书或法律意见生成题",
+      "answer_type": "法律文本",
+      "scoring_method": "rubric_judge",
+      "objective": false
+    },
+    "compliance_response": {
+      "label": "合规拒答与替代建议题",
+      "answer_type": "拒答与替代建议",
+      "scoring_method": "redline",
+      "objective": false
+    }
+  }
+}

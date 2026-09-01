@@ -67,6 +67,29 @@
 - `methodology/03_模型作答/legal/evaluation/run.py`：生成 `legal_model_outputs.jsonl`。
 - `methodology/04_结果评测/legal/scoring/run.py`：生成逐题评分、报告和 Excel。
 
+## JSONL 转 Excel 小工具
+
+项目根目录的 `jsonl_to_excel.py` 用于把任意“一行一个 JSON 对象”的 JSONL 文件转换成 Excel，适合人工查看数据。
+
+先安装依赖：
+
+```powershell
+pip install -r requirements.txt
+```
+
+运行工具：
+
+```powershell
+python .\jsonl_to_excel.py
+```
+
+运行后按提示输入：
+
+1. JSONL 输入文件的完整路径，例如 `C:\llm-eval\data\records.jsonl`；
+2. Excel 输出文件的完整 `.xlsx` 路径，例如 `C:\llm-eval\data\records.xlsx`。
+
+工具会保留字段首次出现的顺序；字典和数组会作为可读 JSON 字符串保存在单元格中，并为 Excel 添加冻结首行、筛选、自动换行和列宽。输出文件已存在时会先询问是否覆盖。
+
 ## 运行目录约定
 
 ```powershell

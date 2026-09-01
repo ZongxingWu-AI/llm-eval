@@ -42,7 +42,7 @@ raw → clean → extract → drafts → releases → validation → evaluation
 | 阶段 | 作用 | 典型结果 |
 |---|---|---|
 | `raw` | 保存原始案件文件，作为不可变审计底稿 | 一案一份 `.md` |
-| `clean` | 不调用大模型，做无损解析、章节切分和规则派生 | `legal_cases_clean.jsonl` |
+| `clean` | 不调用大模型，保存原文、生成脱敏全文并提取稳定规则元数据 | `legal_cases_clean.jsonl` |
 | `extract` | 从 clean 案件提取争议、证据判断和裁判结论 | `legal_cases_extract.jsonl` |
 | `manifests` | 记录来源、选择和批次级追踪信息 | `legal_sources.jsonl`、选择记录、报告 |
 | `drafts` | 保存模型生成但尚未发布的候选题 | `legal_questions_draft.jsonl` |
@@ -56,7 +56,7 @@ raw → clean → extract → drafts → releases → validation → evaluation
 - JSONL 保存案件或题目的业务数据；相邻 `.metadata.json` 保存一次运行的输入、输出、数量、方法、模型和状态等运行信息。
 - manifest 保存来源、选样和集合关系；它不是某一步处理逻辑的替代品。
 - `case_id` 是案件级稳定身份；`source.sha256` 是原始内容指纹。
-- 任何 `source_quote` 都应同时记录 `source_section`，并能在对应章节原文中回查。
+- 任何 `source_quote` 都应能在案件的脱敏全文 `external_text` 中逐字连续回查；最终哈希 `source_quote_sha256` 由本地程序生成，正式接口不再保存 `source_section`。
 - 每个批次、每个阶段都应放置 README，说明本阶段文件、字段、字段来源、上下游和运行方式。
 
 ## 5. 旧目录

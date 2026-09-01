@@ -22,7 +22,6 @@ taxonomy.json
 | `primary_categories` | 五个第一版法律方向。 |
 | `cause_tree` | 一级方向到具体案由的受控树。 |
 | `task_types` | 问题任务类型。 |
-| `reasoning_capabilities` | 推理能力标签。 |
 | `answer_types` | 答案形式。 |
 | `scoring_methods` | `rule`、`redline`、`rubric_judge`。 |
 | `difficulties` | `easy`、`medium`、`hard`。 |

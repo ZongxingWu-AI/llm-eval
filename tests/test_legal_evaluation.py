@@ -25,7 +25,6 @@ class LegalEvaluationTests(unittest.TestCase):
             "question_id": "legal_case_1_01",
             "case_id": "case_1",
             "split": "dev",
-            "primary_issue": "付款责任",
             "task_type": "争议焦点识别与规则适用",
             "scoring_method": "rubric_judge",
             "difficulty": "medium",
@@ -97,6 +96,61 @@ class LegalEvaluationTests(unittest.TestCase):
                 for question in questions
             ],
         )
+
+    def test_build_model_input_scans_complete_prompt_including_options_and_requirements(self):
+        """验证包含选项和要求的完整外发 Prompt 必须经过 PII 扫描。"""
+        question = {
+            **self.question,
+            "context_type": "self_contained",
+            "context": "原告甲与被告乙签订合同。",
+            "question": "请判断责任。",
+            "question_format": "single_choice",
+            "options": [
+                {"option_id": "A", "text": "身份证号：110101199001011234"},
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "身份证号"):
+            _evaluation_module.build_model_input(question)
+
+    def test_legacy_question_without_context_still_sends_public_options_and_requirements(self):
+        """验证旧题无 context 时仍发送选项和公开作答要求，并扫描完整 Prompt。"""
+        question = {
+            **self.question,
+            "question": "请判断责任。",
+            "question_format": "single_choice",
+            "options": [
+                {"option_id": "A", "text": "原告承担责任"},
+                {"option_id": "B", "text": "被告承担责任"},
+            ],
+            "answer_requirements": {
+                "must_include_conclusion": True,
+                "output_format": "只输出选项字母",
+                "error_targets": ["不应外发"],
+            },
+        }
+        prompt = _evaluation_module.build_model_input(question)
+        self.assertIn("A. 原告承担责任", prompt)
+        self.assertIn("B. 被告承担责任", prompt)
+        self.assertIn("must_include_conclusion", prompt)
+        self.assertNotIn("error_targets", prompt)
+
+    def test_build_model_input_never_uses_full_text_or_scoring_fields(self):
+        """验证外发 Prompt 不包含本地原文或评分字段。"""
+        question = {
+            **self.question,
+            "context_type": "self_contained",
+            "context": "必要背景材料。",
+            "question": "请判断责任。",
+            "question_format": "single_choice",
+            "full_text": "本地原始全文：不应外发",
+            "source_evidence": [{"source_quote": "不应外发的原文证据"}],
+            "error_targets": ["statute_hallucination"],
+        }
+        prompt = _evaluation_module.build_model_input(question)
+        self.assertIn("必要背景材料", prompt)
+        self.assertNotIn("本地原始全文", prompt)
+        self.assertNotIn("不应外发的原文证据", prompt)
+        self.assertNotIn("statute_hallucination", prompt)
 
     @patch.object(_evaluation_module.llm_client, "build_client", return_value=object())
     @patch.object(_evaluation_module.llm_client, "read_role", return_value=("base", "key", "contestant"))

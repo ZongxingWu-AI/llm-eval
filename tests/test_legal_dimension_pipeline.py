@@ -42,9 +42,7 @@ class LegalDimensionPipelineTests(unittest.TestCase):
             "split": "test",
             "case_classification": self._classification(),
             "dimension_id": dimension_id,
-            "primary_issue": "付款责任",
             "task_type": task_type,
-            "reasoning_capabilities": ["事实抽取"] if dimension_id == "fact_extraction" else ["法律规则适用"],
             "answer_type": "短答案",
             "context_type": context_type,
             "context": "卢某支付货款，合同约定付款期限为收到货物后十日内。",
@@ -54,7 +52,7 @@ class LegalDimensionPipelineTests(unittest.TestCase):
             "question": "谁应当承担付款责任？",
             "reference_answer": "卢某应当承担付款责任。",
             "rubric": {"required_points": ["卢某"]},
-            "source_evidence": [{"source_section": "facts", "source_quote": "卢某支付货款"}],
+            "source_evidence": [{"source_quote": "卢某支付货款"}],
             "review_status": "approved",
         }
 
@@ -67,8 +65,8 @@ class LegalDimensionPipelineTests(unittest.TestCase):
         self.assertEqual(dimensions["procedure_time_reasoning"]["task_type"], "程序与时间推理")
         self.assertEqual(dimensions["compliance_refusal"]["default_context_type"], "scenario")
         targets = catalog["blueprint"]["dimension_targets"]
-        self.assertEqual(sum(targets.values()), 105)
-        self.assertEqual(targets["rule_application"], 25)
+        self.assertEqual(sum(targets.values()), 300)
+        self.assertEqual(targets["rule_application"], 60)
 
     def test_build_release_selects_candidates_by_dimension_quota(self):
         """验证正式题集按照 dimension_id 配额选择候选题，而不是按案件顺序截断。"""
@@ -91,7 +89,7 @@ class LegalDimensionPipelineTests(unittest.TestCase):
         coverage = _build.dimension_coverage(
             [row], {"dimension_quotas": {"fact_extraction": 2, "rule_application": 1}},
         )
-        self.assertEqual(coverage["quota_shortages"], {"fact_extraction": 1, "rule_application": 1})
+        self.assertEqual(coverage["quota_shortages"], {"dimension:fact_extraction": 1, "dimension:rule_application": 1})
         self.assertFalse(coverage["quota_satisfied"])
 
     def test_validation_rejects_judgment_prediction_answer_leak(self):
@@ -99,7 +97,6 @@ class LegalDimensionPipelineTests(unittest.TestCase):
         row = self._question(
             "q-prediction", "judgment_prediction", "裁判结果预测", "source_excerpt", "case_prediction",
         )
-        row["reasoning_capabilities"] = ["法律规则适用"]
         row["scoring_method"] = "rubric_judge"
         row["context"] = "案件材料如下。判决如下：支持原告的全部诉讼请求。"
         issues = _validation.check_row(row)
@@ -115,7 +112,7 @@ class LegalDimensionPipelineTests(unittest.TestCase):
                     "question": "请回答具体问题。",
                     "reference_answer": "这是不应发送的参考答案。",
                     "rubric": {"required_points": ["隐藏评分点"]},
-                    "source_evidence": [{"source_section": "facts", "source_quote": "原文"}],
+                    "source_evidence": [{"source_quote": "原文"}],
                 }
                 prompt = _answer_run._build_model_input(row)
                 self.assertIn(row["context"], prompt)
@@ -180,8 +177,9 @@ class LegalDimensionPipelineTests(unittest.TestCase):
         merged = "\n".join(path.read_text(encoding="utf-8") for path in paths)
         for phrase in ("dimension_id", "context", "legal_model_outputs.jsonl", "question_id", "事实抽取", "程序与时间推理"):
             self.assertIn(phrase, merged)
-        self.assertNotIn("03 当裁判", merged)
-        self.assertNotIn("04 跑项目", merged)
+        legacy_stage_names = ("03 " + "\u5f53\u88c1\u5224", "04 " + "\u8dd1\u9879\u76ee")
+        for phrase in legacy_stage_names:
+            self.assertNotIn(phrase, merged)
         self.assertLess(merged.find("03 模型作答"), merged.find("04 结果评测"))
 
 

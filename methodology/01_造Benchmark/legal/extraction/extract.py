@@ -2,9 +2,9 @@
 
     作用：
         读取 clean 案件
-        基于 full_text 和全部 sections 建立全文案件事实地图
-        保留旧版争议焦点、证据判断和法院结论字段
-        给结果附 source_section 和 source_quote
+        基于唯一的脱敏全文建立全文案件事实地图
+        统一生成当前 canonical case_fact_map
+        给结果附 source_quote 和本地生成的 source_quote_sha256
         默认可用规则
         可选调用大模型
         大模型失败时保留规则结果
@@ -12,7 +12,7 @@
 
 
 项目位置：法律真实案例评测线的 extraction 阶段。
-输入：命令行指定的 clean 阶段案件 JSONL，其中包含完整原文和章节。
+输入：命令行指定的 clean 阶段案件 JSONL，其中包含唯一脱敏全文 external_text。
 输出：命令行指定的 extract 阶段案件 JSONL，每案新增可回溯的 legal_extraction；同时写运行元数据。
 上下游：上游是无损解析，下游是 generation.generate 的候选题生成。
 副作用：覆盖指定 extract JSONL；默认只用规则，传入 --use-llm 时才调用 EXTRACTOR 模型。"""
@@ -24,6 +24,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import hashlib
 
 from core import llm_client
 from core.data_io import read_jsonl, write_jsonl
@@ -32,13 +33,14 @@ from core.prompt_loader import load_template, render
 from core.run_metadata import new_run_metadata
 from core.project_paths import LEGAL_PROMPT_ROOT as PROMPT_ROOT
 
-EXTRACTOR_VERSION = "legal-extractor-v2"
+EXTRACTOR_VERSION = "legal-extractor-v3"
 
 FACT_MAP_GROUPS = (
     "key_facts",
     "party_relationships",
     "claims",
     "defenses",
+    "disputed_issues",
     "evidence",
     "court_found_facts",
     "procedural_timeline",
@@ -47,9 +49,40 @@ FACT_MAP_GROUPS = (
     "judgment_results",
 )
 
+
+# OpenAI 兼容结构化输出契约：模型只能返回完整事实地图，引用哈希由本地生成。
+_FACT_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "text": {"type": "string", "minLength": 1},
+        "source_quote": {"type": "string", "minLength": 1},
+    },
+    "required": ["text", "source_quote"],
+    "additionalProperties": False,
+}
+LEGAL_EXTRACTION_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "legal_case_fact_map",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "case_fact_map": {
+                    "type": "object",
+                    "properties": {group: {"type": "array", "items": _FACT_ITEM_SCHEMA} for group in FACT_MAP_GROUPS},
+                    "required": list(FACT_MAP_GROUPS),
+                    "additionalProperties": False,
+                },
+            },
+            "required": ["case_fact_map"],
+            "additionalProperties": False,
+        },
+    },
+}
+
 _FACT_SECTION_NAMES = (
-    "facts", "fact", "case_facts", "background", "case_background",
-    "facts_summary", "source_material", "header",
+    "facts", "fact", "case_facts", "background", "case_background", "header",
 )
 _CLAIM_SECTION_NAMES = ("claims", "claim", "requests", "诉讼请求")
 _DEFENSE_SECTION_NAMES = ("defenses", "defense", "arguments", "responses", "抗辩")
@@ -61,6 +94,15 @@ _TIMELINE_SECTION_NAMES = (
 _LAW_SECTION_NAMES = (
     "applied_laws", "laws", "cited_laws", "cited_statutes", "legal_basis",
 )
+
+# 规则 fallback 只在内存中对 external_text 做粗粒度扫描；结果不写回案件接口。
+_EXTERNAL_SECTION_MARKERS = {
+    "claims": ("诉讼请求", "请求事项"),
+    "defenses": ("被告辩称", "被告答辩", "答辩意见", "未作答辩"),
+    "facts": ("经审理查明", "审理查明", "本院查明"),
+    "court_reasoning": ("本院认为", "法院认为"),
+    "judgment": ("判决如下", "裁判主文", "判决主文"),
+}
 
 
 class _QPSLimiter:
@@ -116,25 +158,48 @@ def _text(value) -> str:
     return str(value).strip()
 
 
-def _source_texts(case: dict) -> dict[str, str]:
-    """返回可用于事实提取和来源校验的全文章节映射。
+def _external_marker_positions(text: str) -> list[tuple[int, str]]:
+    """在脱敏全文中定位规则 fallback 使用的临时扫描边界。"""
+    positions: list[tuple[int, str]] = []
+    for section, markers in _EXTERNAL_SECTION_MARKERS.items():
+        matches = [re.search(re.escape(marker), text) for marker in markers]
+        matches = [match for match in matches if match]
+        if matches:
+            positions.append((min(match.start() for match in matches), section))
+    return sorted(positions)
 
-    优先使用 clean 阶段保留的全部 ``sections``。只有章节完全缺失时，才把
-    ``full_text`` 作为一个可定位的 ``full_text`` 章节，避免无来源地猜测事实。
+
+def _source_groups(external_text: str) -> dict[str, str]:
+    """从唯一的脱敏全文建立规则 fallback 的临时扫描视图。
+
+    该视图只存在于当前函数调用的内存中，不读取或保存 clean 阶段的章节字段，
+    也不改变 LLM 引用校验：模型引用仍必须直接出现在完整 external_text 中。
     """
-
-    raw_sections = case.get("sections")
-    sections: dict[str, str] = {}
-    if isinstance(raw_sections, dict):
-        for name, value in raw_sections.items():
-            text = _text(value)
-            if text:
-                sections[str(name)] = text
-    if not sections:
-        full_text = _text(case.get("full_text"))
-        if full_text:
-            sections["full_text"] = full_text
-    return sections
+    if not external_text:
+        return {}
+    groups = {key: "" for key in (
+        "header", "claims", "defenses", "facts", "evidence",
+        "court_reasoning", "judgment", "tail",
+    )}
+    positions = _external_marker_positions(external_text)
+    if not positions:
+        groups["header"] = external_text
+        return groups
+    groups["header"] = external_text[:positions[0][0]]
+    for index, (start_pos, section) in enumerate(positions):
+        end_pos = positions[index + 1][0] if index + 1 < len(positions) else len(external_text)
+        groups[section] = external_text[start_pos:end_pos]
+    facts = groups["facts"]
+    evidence_match = re.search(r"(?:以上事实|上述事实).{0,20}(?:证据|证明)", facts)
+    if evidence_match:
+        groups["evidence"] = facts[evidence_match.start():]
+        groups["facts"] = facts[:evidence_match.start()]
+    judgment = groups["judgment"]
+    tail_match = re.search(r"(?:如不服本判决|审判长|审判员|书记员|本件与原本核对无异)", judgment)
+    if tail_match:
+        groups["tail"] = judgment[tail_match.start():]
+        groups["judgment"] = judgment[:tail_match.start()]
+    return {str(name): _text(value) for name, value in groups.items() if _text(value)}
 
 
 def _empty_fact_map() -> dict[str, list[dict]]:
@@ -143,48 +208,46 @@ def _empty_fact_map() -> dict[str, list[dict]]:
     return {group: [] for group in FACT_MAP_GROUPS}
 
 
-def _fact_item(text: str, source_section: str, source_quote: str) -> dict | None:
-    """创建严格三字段的事实地图条目。"""
+def _fact_item(text: str, source_quote: str) -> dict | None:
+    """创建事实地图条目；哈希只由本地程序计算，不携带章节标签。"""
 
     text = _text(text).strip()
-    source_section = _text(source_section).strip()
     source_quote = _text(source_quote).strip()
-    if not text or not source_section or not source_quote:
+    if not text or not source_quote:
         return None
     return {
         "text": text,
-        "source_section": source_section,
         "source_quote": source_quote,
+        "source_quote_sha256": hashlib.sha256(source_quote.encode("utf-8")).hexdigest(),
     }
 
-
 def _append_fact(fact_map: dict[str, list[dict]], group: str,
-                 text: str, source_section: str, source_quote: str) -> None:
+                 text: str, source_quote: str) -> None:
     """追加一个去重且可回查的事实地图条目。"""
 
-    item = _fact_item(text, source_section, source_quote)
+    item = _fact_item(text, source_quote)
     if item is None or group not in fact_map:
         return
     if item not in fact_map[group]:
         fact_map[group].append(item)
 
 
-def _sentences_from_sections(sections: dict[str, str], names) -> list[tuple[str, str]]:
+def _sentences_from_groups(groups: dict[str, str], names) -> list[tuple[str, str]]:
     """按章节顺序返回指定章节中的 ``(章节名, 原文句子)``。"""
 
     wanted = set(names)
     result: list[tuple[str, str]] = []
-    for section_name, section_text in sections.items():
+    for section_name, section_text in groups.items():
         if section_name in wanted:
             result.extend((section_name, sentence) for sentence in _sentences(section_text))
     return result
 
 
-def _all_sentences(sections: dict[str, str]) -> list[tuple[str, str]]:
+def _all_sentences(groups: dict[str, str]) -> list[tuple[str, str]]:
     """按全文章节顺序返回所有非空句子。"""
 
     result: list[tuple[str, str]] = []
-    for section_name, section_text in sections.items():
+    for section_name, section_text in groups.items():
         result.extend((section_name, sentence) for sentence in _sentences(section_text))
     return result
 
@@ -194,36 +257,36 @@ def _contains_any(text: str, keywords) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
-def _find_party_sentences(sections: dict[str, str], name: str, role: str) -> tuple[str, str] | None:
+def _find_party_sentences(groups: dict[str, str], name: str, role: str) -> tuple[str, str] | None:
     """为当事人关系选择包含主体名称的原文连续句。"""
 
-    for section_name, sentence in _all_sentences(sections):
+    for section_name, sentence in _all_sentences(groups):
         if name and name in sentence and (not role or role in sentence):
             return section_name, sentence
-    for section_name, sentence in _all_sentences(sections):
+    for section_name, sentence in _all_sentences(groups):
         if name and name in sentence:
             return section_name, sentence
     return None
 
 
-def _build_fact_map(case: dict, sections: dict[str, str]) -> dict[str, list[dict]]:
+def _build_fact_map(case: dict, groups: dict[str, str]) -> dict[str, list[dict]]:
     """从全文章节和已解析的 parties 建立可回溯的十类事实地图。
 
     这是规则 fallback，不试图替代 LLM 的法律理解；它的职责是确保全文信息
-    有稳定的、带原文定位的最低覆盖，尤其是在旧版 LLM 只返回三组字段时。
+    有稳定的、带原文定位的最低覆盖，作为模型抽取失败时的规则排查结果。
     """
 
     fact_map = _empty_fact_map()
 
-    fact_sentences = _sentences_from_sections(sections, _FACT_SECTION_NAMES)
+    fact_sentences = _sentences_from_groups(groups, _FACT_SECTION_NAMES)
     if not fact_sentences:
         fact_sentences = [
             (section, sentence)
-            for section, sentence in _all_sentences(sections)
+            for section, sentence in _all_sentences(groups)
             if section not in {"court_reasoning", "judgment"}
         ]
     for section, sentence in fact_sentences:
-        _append_fact(fact_map, "key_facts", sentence, section, sentence)
+        _append_fact(fact_map, "key_facts", sentence, sentence)
 
     parties = case.get("parties", [])
     if isinstance(parties, list):
@@ -232,406 +295,264 @@ def _build_fact_map(case: dict, sections: dict[str, str]) -> dict[str, list[dict
                 continue
             role = _text(party.get("role"))
             name = _text(party.get("name"))
-            located = _find_party_sentences(sections, name, role)
+            located = _find_party_sentences(groups, name, role)
             if located:
                 section, quote = located
                 _append_fact(
-                    fact_map, "party_relationships", f"{role}：{name}".strip("："), section, quote
+                    fact_map, "party_relationships", f"{role}：{name}".strip("："), quote
                 )
     if not fact_map["party_relationships"]:
         party_pattern = re.compile(r"(原告|被告|第三人|申请人|被申请人)\s*[:：]\s*([^，。；\n]+)")
-        for section, sentence in _all_sentences(sections):
+        for section, sentence in _all_sentences(groups):
             for match in party_pattern.finditer(sentence):
                 _append_fact(
                     fact_map, "party_relationships", f"{match.group(1)}：{match.group(2).strip()}",
-                    section, sentence,
+                    sentence,
                 )
 
-    claim_sentences = _sentences_from_sections(sections, _CLAIM_SECTION_NAMES)
+    claim_sentences = _sentences_from_groups(groups, _CLAIM_SECTION_NAMES)
     if not claim_sentences:
         claim_sentences = [
-            (section, sentence) for section, sentence in _all_sentences(sections)
+            (section, sentence) for section, sentence in _all_sentences(groups)
             if _contains_any(sentence, ("诉讼请求", "请求", "要求", "诉请"))
         ]
     for section, sentence in claim_sentences:
-        _append_fact(fact_map, "claims", sentence, section, sentence)
+        _append_fact(fact_map, "claims", sentence, sentence)
 
-    defense_sentences = _sentences_from_sections(sections, _DEFENSE_SECTION_NAMES)
+    defense_sentences = _sentences_from_groups(groups, _DEFENSE_SECTION_NAMES)
     if not defense_sentences:
         defense_sentences = [
-            (section, sentence) for section, sentence in _all_sentences(sections)
+            (section, sentence) for section, sentence in _all_sentences(groups)
             if _contains_any(sentence, ("辩称", "抗辩", "答辩", "不认可", "不同意"))
         ]
     for section, sentence in defense_sentences:
-        _append_fact(fact_map, "defenses", sentence, section, sentence)
+        _append_fact(fact_map, "defenses", sentence, sentence)
 
-    evidence_sentences = _sentences_from_sections(sections, _EVIDENCE_SECTION_NAMES)
+    issue_sentences = _sentences_from_groups(groups, ("court_reasoning",))
+    issue_sentences = [
+        (section, sentence) for section, sentence in issue_sentences
+        if sentence.startswith("关于") or _contains_any(sentence, ("争议焦点", "争议在于", "焦点是"))
+    ]
+    for section, sentence in issue_sentences:
+        _append_fact(fact_map, "disputed_issues", sentence, sentence)
+
+    evidence_sentences = _sentences_from_groups(groups, _EVIDENCE_SECTION_NAMES)
     if not evidence_sentences:
         evidence_sentences = [
-            (section, sentence) for section, sentence in _all_sentences(sections)
+            (section, sentence) for section, sentence in _all_sentences(groups)
             if _contains_any(sentence, ("证据", "提交", "出示", "证明", "举证"))
         ]
     for section, sentence in evidence_sentences:
-        _append_fact(fact_map, "evidence", sentence, section, sentence)
+        _append_fact(fact_map, "evidence", sentence, sentence)
 
     found_fact_sentences = [
-        (section, sentence) for section, sentence in _sentences_from_sections(
-            sections, ("facts", "fact", "case_facts", "facts_summary")
+        (section, sentence) for section, sentence in _sentences_from_groups(
+            groups, ("facts", "fact", "case_facts")
         )
     ]
     found_fact_sentences.extend(
-        (section, sentence) for section, sentence in _sentences_from_sections(
-            sections, ("court_reasoning",)
+        (section, sentence) for section, sentence in _sentences_from_groups(
+            groups, ("court_reasoning",)
         ) if _contains_any(sentence, ("查明", "认定事实", "事实表明", "经审理查明"))
     )
     for section, sentence in found_fact_sentences:
-        _append_fact(fact_map, "court_found_facts", sentence, section, sentence)
+        _append_fact(fact_map, "court_found_facts", sentence, sentence)
 
-    timeline_sentences = _sentences_from_sections(sections, _TIMELINE_SECTION_NAMES)
+    timeline_sentences = _sentences_from_groups(groups, _TIMELINE_SECTION_NAMES)
     date_pattern = re.compile(r"(?:19|20)\d{2}[年./-]\d{1,2}[月./-]\d{1,2}日?|二[〇零一二三四五六七八九十百千万亿]+年")
     timeline_sentences.extend(
-        (section, sentence) for section, sentence in _all_sentences(sections)
+        (section, sentence) for section, sentence in _all_sentences(groups)
         if date_pattern.search(sentence) or _contains_any(
             sentence, ("起诉", "受理", "立案", "开庭", "送达", "上诉", "审理", "判决")
         )
     )
     for section, sentence in timeline_sentences:
-        _append_fact(fact_map, "procedural_timeline", sentence, section, sentence)
+        _append_fact(fact_map, "procedural_timeline", sentence, sentence)
 
     law_pattern = re.compile(r"《[^》]+》|第[一二三四五六七八九十百千万零〇\d]+条")
-    law_sentences = _sentences_from_sections(sections, _LAW_SECTION_NAMES)
+    law_sentences = _sentences_from_groups(groups, _LAW_SECTION_NAMES)
     law_sentences.extend(
-        (section, sentence) for section, sentence in _all_sentences(sections)
+        (section, sentence) for section, sentence in _all_sentences(groups)
         if law_pattern.search(sentence)
     )
     for section, sentence in law_sentences:
-        _append_fact(fact_map, "applied_laws", sentence, section, sentence)
+        _append_fact(fact_map, "applied_laws", sentence, sentence)
 
-    for section, sentence in _sentences_from_sections(sections, ("court_reasoning",)):
-        _append_fact(fact_map, "court_reasoning", sentence, section, sentence)
-    for section, sentence in _sentences_from_sections(sections, ("judgment",)):
-        _append_fact(fact_map, "judgment_results", sentence, section, sentence)
+    for section, sentence in _sentences_from_groups(groups, ("court_reasoning",)):
+        _append_fact(fact_map, "court_reasoning", sentence, sentence)
+    judgment_sentences = _sentences_from_groups(groups, ("judgment",))
+    if not judgment_sentences:
+        # 简化输入有时没有可识别的“判决如下”章节标记；此时仍从全文
+        # 提取明确的裁判主文句，避免规则排查结果漏掉结论。
+        judgment_sentences = [
+            (section, sentence)
+            for section, sentence in _all_sentences(groups)
+            if _contains_any(sentence, ("判决", "裁定", "驳回诉讼请求", "支持诉讼请求"))
+        ]
+    for section, sentence in judgment_sentences:
+        _append_fact(fact_map, "judgment_results", sentence, sentence)
 
     return fact_map
 
 
 def deterministic_extract(case: dict) -> dict:
-    """用途：基于完整 ``sections/full_text`` 生成旧字段和全文事实地图。
+    """基于完整脱敏章节生成 canonical 事实地图。
 
-             旧字段保持原有语义；``case_fact_map`` 是面向多维度出题的全文
-             结构化 fallback。所有事实地图条目都严格保留原文来源定位。
-    输入：case 是 ingestion 阶段产生且包含 sections 的案件字典。
-    输出：返回旧版三组字段以及 ``case_fact_map`` 十个固定分组。
-    运行前数据形态：运行前案件只有原文章节。
-    运行后数据变化：运行后每条证据判断和结论都带 source_section 与 source_quote。
-    副作用：只读取案件字典，不写文件、不调用模型。
-    异常或失败处理：章节缺失时对应列表为空，不生成无来源结论。
-    最小示例：判决主文中的一句会成为 conclusion，引用字段保存同一句原文。"""
-
-    sections = _source_texts(case)
-    reasoning = sections.get("court_reasoning", "")
-    judgment = sections.get("judgment", "")
-    conclusions: list[dict] = []
-    conclusion_keywords = ("支持", "不予支持", "确认", "认定", "调整为", "承担", "判决")
-    for section_name, section_text in (("court_reasoning", reasoning), ("judgment", judgment)):
-        for sentence in _sentences(section_text):
-            is_judgment = section_name == "judgment"
-            has_keyword = False
-            for keyword in conclusion_keywords:
-                if keyword in sentence:
-                    has_keyword = True
-                    break
-            if is_judgment or has_keyword:
-                conclusions.append({
-                    "conclusion": sentence,
-                    "source_section": section_name,
-                    "source_quote": sentence,
-                })
-
-    evidence_findings: list[dict] = []
-    evidence_keywords = ("证据", "证据链", "证明", "不足以", "举证")
-    for sentence in _sentences(reasoning):
-        has_evidence_keyword = False
-        for keyword in evidence_keywords:
-            if keyword in sentence:
-                has_evidence_keyword = True
-                break
-        if has_evidence_keyword:
-            evidence_findings.append({
-                "conclusion": sentence,
-                "source_section": "court_reasoning",
-                "source_quote": sentence,
-            })
-
-    issues: list[str] = []
-    for sentence in _sentences(reasoning):
-        if sentence.startswith("关于"):
-            issues.append(sentence[:80])
-    return {
-        "legal_issues": issues,
-        "evidence_findings": evidence_findings,
-        "conclusions": conclusions,
-        "case_fact_map": _build_fact_map(case, sections),
-    }
-
-
-def _valid_grounded_items(items, sections: dict) -> list[dict]:
-    """用途：过滤无法通过章节名和原文短引定位的模型提取项。
-
-           "怎么防止大模型胡编来源？"
-
-    输入：items 是模型返回的候选字典列表；sections 是案件章节映射。
-    输出：返回 source_quote 确实出现在指定 source_section 中的字典列表。
-    运行前数据形态：运行前模型结论可能含幻觉引用。
-    运行后数据变化：运行后只保留可回溯到原判决章节的结论。
-    副作用：只处理内存，不写文件、不调用模型。
-    异常或失败处理：items 类型错误、字段缺失、章节不存在或引用不在原文时跳过该项。
-    最小示例：source_section=court_reasoning 且 quote 在该章节中时保留，否则过滤。"""
-
-    valid: list[dict] = []
-    if not isinstance(items, list):
-        return valid
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        section = item.get("source_section", "")
-        quote = item.get("source_quote", "")
-        section_text = sections.get(section, "")
-        if section in sections and quote and quote in section_text:
-            valid.append(item)
-    return valid
-
-
-def _valid_fact_items(items, sections: dict) -> list[dict]:
-    """校验并规范模型返回的新事实地图条目。
-
-    新契约只接受 ``text/source_section/source_quote`` 三个字段；为兼容旧版
-    提取 Prompt，也允许模型把旧字段中的 ``conclusion`` 作为 text 来源，
-    但输出统一规范为三字段。
+    规则结果仅作为排查用 fallback，不能被视为专家确认结果。
     """
+    external_text = _text(case.get("external_text"))
+    source_groups = _source_groups(external_text)
+    return {"case_fact_map": _build_fact_map(case, source_groups)}
+
+
+def _valid_fact_items(items, external_text: str) -> tuple[list[dict], list[str]]:
+    """严格校验模型条目，并由程序生成引用哈希。"""
 
     if not isinstance(items, list):
-        return []
+        return [], ["字段不是数组"]
     valid: list[dict] = []
-    for item in items:
+    errors: list[str] = []
+    for index, item in enumerate(items):
         if not isinstance(item, dict):
+            errors.append(f"第 {index} 项不是对象")
             continue
-        section = _text(item.get("source_section"))
+        allowed = {"text", "source_quote"}
+        extra = set(item) - allowed
+        if extra:
+            errors.append(f"第 {index} 项包含未定义字段")
+            continue
         quote = _text(item.get("source_quote"))
-        text = _text(item.get("text") or item.get("conclusion") or item.get("fact"))
-        if section not in sections or not quote or quote not in sections[section]:
+        text = _text(item.get("text"))
+        if not text or not quote:
+            errors.append(f"第 {index} 项缺少 text/source_quote")
             continue
-        normalized = _fact_item(text, section, quote)
+        if quote not in external_text:
+            errors.append(f"第 {index} 项 source_quote 无法在脱敏全文中逐字回查")
+            continue
+        normalized = _fact_item(text, quote)
         if normalized is not None and normalized not in valid:
             valid.append(normalized)
-    return valid
+    return valid, errors
 
-
-def _normalise_issues(values) -> list[str]:
-    """规范旧版 legal_issues 字符串数组。"""
-
-    if not isinstance(values, list):
-        return []
-    return [issue for issue in (_text(value).strip() for value in values) if issue]
-
-
-def _candidate_fact_map(candidate: dict, sections: dict) -> tuple[dict[str, list[dict]], list[str], bool]:
-    """提取候选事实地图；缺失字段由规则 fallback 补齐。"""
-
+def _candidate_fact_map(candidate: dict, external_text: str) -> tuple[dict[str, list[dict]], list[str], bool]:
+    """严格校验完整 canonical case_fact_map，不做部分字段或规则混合。"""
+    errors: list[str] = []
+    if not isinstance(candidate, dict):
+        return _empty_fact_map(), ["模型输出不是对象"], False
+    if set(candidate) != {"case_fact_map"}:
+        extras = set(candidate) - {"case_fact_map"}
+        if extras:
+            errors.append("模型顶层包含未定义字段")
     candidate_map = candidate.get("case_fact_map")
     if not isinstance(candidate_map, dict):
-        candidate_map = candidate
+        errors.append("模型输出缺少 case_fact_map 对象")
+        return _empty_fact_map(), errors, False
+    missing = [group for group in FACT_MAP_GROUPS if group not in candidate_map]
+    extras = [group for group in candidate_map if group not in FACT_MAP_GROUPS]
+    if missing:
+        errors.append("模型事实地图缺少字段：" + ", ".join(missing))
+    if extras:
+        errors.append("模型事实地图包含未定义字段")
+    if errors:
+        return _empty_fact_map(), errors, False
     fact_map = _empty_fact_map()
-    errors: list[str] = []
-    used = False
     for group in FACT_MAP_GROUPS:
-        if group not in candidate_map:
-            continue
-        used = True
-        raw_items = candidate_map.get(group)
-        if not isinstance(raw_items, list):
-            errors.append(f"模型事实地图字段 {group} 不是数组，已保留规则 fallback")
-            continue
-        valid = _valid_fact_items(raw_items, sections)
-        if len(valid) != len(raw_items):
-            errors.append(f"模型事实地图字段 {group} 存在无法回查的引用，已保留规则 fallback")
-            continue
+        valid, item_errors = _valid_fact_items(candidate_map[group], external_text)
+        if item_errors:
+            errors.extend([f"{group}：{message}" for message in item_errors])
+        if len(valid) != len(candidate_map[group]):
+            errors.append(f"模型事实地图字段 {group} 存在重复或无效条目")
         fact_map[group] = valid
-    return fact_map, errors, used
-
+    return fact_map, errors, True
 
 def extract_case(case: dict, client=None, model: str = "", before_model_call=None) -> dict:
-    """用途：为单个 clean 案件生成 legal_extraction，并在启用客户端时融合有来源的大模型结果。
-
-       "规则兜底:
-        extract_case()
-            ↓
-        先调用 deterministic_extract()
-            ↓
-        先得到规则结果
-             ↓
-        如果没有 client：
-            直接使用规则结果
-             ↓
-        如果有 client：
-            再尝试调用大模型
-             ↓
-        大模型成功且结果可定位：
-            使用 llm_grounded 结果
-             ↓
-        大模型失败：
-            保留前面已经得到的规则结果
-
-    输入：case 是 clean 案件；client/model 为空时只走规则路径；before_model_call 可在每次模型请求前限流。
-    输出：返回案件浅拷贝，并新增 legal_extraction 和 extractor_version。
-    运行前数据形态：运行前包含 sections、classification 等解析字段。
-    运行后数据变化：运行后增加争议焦点、证据判断和法院结论，原 full_text 与 sections 不变。
-    副作用：client 存在时会加载 Prompt 并调用模型；本函数本身不写文件。
-    异常或失败处理：模型异常或 JSON 解析失败时保留确定性提取；无来源的模型项被过滤。
-    最小示例：client=None 时输出完全由 deterministic_extract 产生。"""
-
-    extracted = deterministic_extract(case)
-    method = "rules"
+    """为单个案件生成 canonical 事实地图和可信状态。"""
+    fallback = deterministic_extract(case)
+    extracted = fallback
+    method = "rules_fallback"
+    review_status = "needs_review"
     errors: list[str] = []
     if client is not None:
         template = load_template("legal_extraction_prompt.md", PROMPT_ROOT)
-        prompt = render(template, {
-            "case_sections": json.dumps({
-                "full_text": _text(case.get("full_text")),
-                "sections": case.get("sections", {}),
-            }, ensure_ascii=False),
-            "case_full_text": _text(case.get("full_text")),
-        })
+        external_text = _text(case.get("external_text"))
+        prompt = render(template, {"external_text": external_text})
         try:
             raw = llm_client.call_model(
-                client, model, prompt, 0, 8192, before_attempt=before_model_call
+                client, model, prompt, 0, 8192,
+                before_attempt=before_model_call,
+                response_format=LEGAL_EXTRACTION_RESPONSE_FORMAT,
             )[0]
             candidate = parse_json_object(raw)
-            sections = _source_texts(case)
-            candidate_conclusions = candidate.get("conclusions")
-            candidate_evidence = candidate.get("evidence_findings")
-            legacy_present = any(
-                field in candidate for field in ("legal_issues", "evidence_findings", "conclusions")
-            )
-            legacy_valid = True
-            legacy_values = {
-                "legal_issues": extracted["legal_issues"],
-                "evidence_findings": extracted["evidence_findings"],
-                "conclusions": extracted["conclusions"],
-            }
-            if "legal_issues" in candidate:
-                if not isinstance(candidate.get("legal_issues"), list):
-                    legacy_valid = False
-                else:
-                    legacy_values["legal_issues"] = _normalise_issues(candidate.get("legal_issues"))
-            if "conclusions" in candidate:
-                if not isinstance(candidate_conclusions, list):
-                    legacy_valid = False
-                else:
-                    llm_conclusions = _valid_grounded_items(candidate_conclusions, sections)
-                    if len(llm_conclusions) != len(candidate_conclusions):
-                        legacy_valid = False
-                    else:
-                        legacy_values["conclusions"] = llm_conclusions
-            if "evidence_findings" in candidate:
-                if not isinstance(candidate_evidence, list):
-                    legacy_valid = False
-                else:
-                    llm_evidence = _valid_grounded_items(candidate_evidence, sections)
-                    if len(llm_evidence) != len(candidate_evidence):
-                        legacy_valid = False
-                    else:
-                        legacy_values["evidence_findings"] = llm_evidence
-
-            candidate_map, map_errors, map_present = _candidate_fact_map(candidate, sections)
-            errors.extend(map_errors)
-            if legacy_present and not legacy_valid:
-                errors.append("模型旧版字段引用无法在原章节定位，已回退规则提取")
+            # 引用校验的唯一权威来源是完整脱敏全文；不拼接其他案件字段或原始文本。
+            candidate_map, map_errors, complete = _candidate_fact_map(candidate, external_text)
+            if not complete or map_errors:
+                errors.extend(map_errors or ["模型事实地图未通过完整性校验"])
             else:
-                extracted = {
-                    **extracted,
-                    **legacy_values,
-                    "case_fact_map": {
-                        group: candidate_map[group] if group in candidate_map and group in candidate.get("case_fact_map", candidate) and not any(
-                            error.startswith(f"模型事实地图字段 {group}") for error in map_errors
-                        ) else extracted["case_fact_map"][group]
-                        for group in FACT_MAP_GROUPS
-                    },
-                }
-                if legacy_present or map_present:
-                    method = "llm_grounded"
+                extracted = {"case_fact_map": candidate_map}
+                method = "llm_grounded"
+                review_status = "ready_for_generation"
         except Exception as exc:
-            errors.append(f"模型提取失败，已回退规则提取：{exc}")
-    result = dict(case)
-    result["legal_extraction"] = extracted
-    result.setdefault("classification", {})["legal_issues"] = extracted["legal_issues"]
-    result.setdefault("quality", {})["extraction"] = {
-        "version": EXTRACTOR_VERSION, "method": method, "status": "needs_review", "errors": errors
-    }
-    return result
-
-
-def _summarize_methods(results: list[dict]) -> tuple[str, dict[str, int]]:
-    """根据每条案件的实际提取结果汇总批次方法。
-
-    返回值中的 ``method`` 不依据 ``--use-llm`` 推断，而是读取每条结果的
-    ``quality.extraction.method``。这样即使模型调用失败并回退规则，批次元数据
-    也会如实记录为 ``rules`` 或 ``mixed``。
-    """
-
-    method_counts = {"rules": 0, "llm_grounded": 0}
-    for result in results:
-        method = result.get("quality", {}).get("extraction", {}).get("method")
-        if method in method_counts:
-            method_counts[method] += 1
-
-    used_methods = [method for method, count in method_counts.items() if count]
-    if not used_methods:
-        batch_method = "none"
-    elif len(used_methods) == 1:
-        batch_method = used_methods[0]
+            errors.append(f"模型提取失败，已保留规则排查结果：{exc}")
     else:
-        batch_method = "mixed"
-    return batch_method, method_counts
-
-
-def _fallback_result(case: dict, error: Exception) -> dict:
-    """把未预期的单案异常转换为规则降级结果，避免中断整批处理。"""
-    try:
-        extracted = deterministic_extract(case)
-        errors = [f"单案处理失败，已回退规则提取：{error}"]
-    except Exception as fallback_error:
-        extracted = {
-            "legal_issues": [],
-            "evidence_findings": [],
-            "conclusions": [],
-            "case_fact_map": _empty_fact_map(),
-        }
-        errors = [
-            f"单案处理失败：{error}",
-            f"规则降级也失败：{fallback_error}",
-        ]
+        errors.append("未启用 LLM 抽取，当前事实地图仅为规则排查结果")
     result = dict(case)
     result["legal_extraction"] = extracted
-    result["classification"] = dict(case.get("classification", {}))
-    result["classification"]["legal_issues"] = extracted["legal_issues"]
     result["quality"] = dict(case.get("quality", {}))
     result["quality"]["extraction"] = {
         "version": EXTRACTOR_VERSION,
-        "method": "rules",
-        "status": "needs_review",
+        "method": method,
+        "status": review_status,
+        "review_status": review_status,
         "errors": errors,
     }
     return result
 
+def _extract_one(case: dict, client=None, model: str = "", limiter=None) -> dict:
+    """执行单案抽取，并把意外异常转换为 needs_review 结果。
 
-def _extract_one(case: dict, client, model: str, limiter: _QPSLimiter | None) -> dict:
-    """在线程池中处理单案；意外异常也转换成规则降级结果。"""
+    该包装器由批量串行/并发路径共用，确保单个案件失败不会中断整个批次，
+    同时通过共享 limiter 控制每个模型请求的启动时间。
+    """
     try:
         before_model_call = limiter.wait if limiter is not None else None
-        return extract_case(case, client, model, before_model_call=before_model_call)
+        return extract_case(
+            case,
+            client,
+            model,
+            before_model_call=before_model_call,
+        )
     except Exception as exc:
         return _fallback_result(case, exc)
+def _summarize_methods(results: list[dict]) -> tuple[str, dict[str, int]]:
+    """汇总 llm_grounded 与 rules_fallback 的案件数。"""
+    method_counts = {"rules_fallback": 0, "llm_grounded": 0}
+    for result in results:
+        method = result.get("quality", {}).get("extraction", {}).get("method")
+        if method in method_counts:
+            method_counts[method] += 1
+    used_methods = [method for method, count in method_counts.items() if count]
+    return ("none" if not used_methods else used_methods[0] if len(used_methods) == 1 else "mixed", method_counts)
+
+
+def _fallback_result(case: dict, error: Exception) -> dict:
+    """把单案异常转换为需要审核的规则排查结果。"""
+    try:
+        extracted = deterministic_extract(case)
+        errors = [f"单案处理失败，已保留规则排查结果：{error}"]
+    except Exception as fallback_error:
+        extracted = {"case_fact_map": _empty_fact_map()}
+        errors = [f"单案处理失败：{error}", f"规则排查也失败：{fallback_error}"]
+    result = dict(case)
+    result["legal_extraction"] = extracted
+    result["quality"] = dict(case.get("quality", {}))
+    result["quality"]["extraction"] = {
+        "version": EXTRACTOR_VERSION,
+        "method": "rules_fallback",
+        "status": "needs_review",
+        "review_status": "needs_review",
+        "errors": errors,
+    }
+    return result
 
 
 def run(input_path: str | Path, output_path: str | Path,

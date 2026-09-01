@@ -7,13 +7,13 @@
 正式题目的结构以 `methodology/01_造Benchmark/legal/schemas/question.schema.json` 为准，关键字段分为四组：
 
 - 身份与划分：`question_id`、`case_id`、`split`；
-- 维度与任务：`dimension_id`、`task_type`、`reasoning_capabilities`、`primary_issue`；
+- 维度与任务：`dimension_id`、`task_type`；
 - 材料与问题：`context_type`、`context`、`question`；
 - 参考与评分：`reference_answer`、`rubric`、`source_evidence`、`scoring_method`、`difficulty`、`risk_level`。
 
 `dimension_id` 是九类能力维度的稳定统计键；`task_type` 是面向用户的任务分类；`context_type` 决定 03 如何给模型组织材料。`question` 不应依赖未提供的“上文”。
 
-`source_evidence` 的每个条目至少包含 `source_section` 和 `source_quote`，用于回溯案件原文。参考答案和法院结论不得泄露到裁判结果预测题的 `context` 中。
+`source_evidence` 的每个条目至少包含 `source_quote`，可附带由本地程序生成的 `source_quote_sha256`；引用直接在案件脱敏全文 `external_text` 中逐字回溯。参考答案和法院结论不得泄露到裁判结果预测题的 `context` 中。
 
 ## 九类维度
 

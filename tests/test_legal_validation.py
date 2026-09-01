@@ -1,6 +1,6 @@
 """法律正式题集验证测试。
 
-被测模块：validation.check_row 和 validate。覆盖 source quote 章节定位及同案问题不得跨 split。
+被测模块：validation.check_row 和 validate。覆盖 source quote 全文定位及同案问题不得跨 split。
 使用内存题目和案件，不写报告、不调用模型。
 失败表示不可追溯引用或数据泄漏可能未被发布前检查发现。"""
 
@@ -29,13 +29,13 @@ class LegalValidationTests(unittest.TestCase):
 
         self.row = {
             "question_id": "q1", "case_id": "case_1", "split": "dev",
-            "primary_issue": "付款责任", "dimension_id": "fact_extraction", "task_type": "事实抽取",
-            "reasoning_capabilities": ["事实抽取"], "answer_type": "短答案",
+            "dimension_id": "fact_extraction", "task_type": "事实抽取",
+            "answer_type": "短答案",
             "scoring_method": "rule", "difficulty": "easy", "risk_level": "low",
             "context_type": "source_excerpt", "context": "卢某支付货款。",
             "question": "谁付款？", "reference_answer": "卢某付款。",
             "rubric": {"required_points": ["卢某"]},
-            "source_evidence": [{"source_section": "judgment", "source_quote": "卢某支付货款"}],
+            "source_evidence": [{"source_quote": "卢某支付货款"}],
             "case_classification": {
                 "domain": "民事", "procedure_stage": "一审", "document_type": "判决书",
                 "primary_category": "合同、准合同纠纷",
@@ -43,7 +43,7 @@ class LegalValidationTests(unittest.TestCase):
                 "procedure_tags": [], "evidence_tags": ["书证"],
             },
         }
-        self.case = {"case_id": "case_1", "sections": {"judgment": "判决如下：卢某支付货款。"}}
+        self.case = {"case_id": "case_1", "external_text": "判决如下：卢某支付货款。"}
 
     def test_run_writes_validation_report_and_metadata(self):
         """测试目标：验证验证阶段写出 JSONL、Markdown 和相邻 metadata。
@@ -74,16 +74,43 @@ class LegalValidationTests(unittest.TestCase):
             self.assertEqual(metadata["questions"], 1)
             self.assertEqual(metadata["failures"], 0)
 
-    def test_source_quote_must_exist_in_named_section(self):
-        """测试目标：验证证据短引必须出现在声明的案件章节中。
-        准备数据：准备一题引用不存在文本和一个含 sections 的案件。
+    def test_source_quote_must_exist_in_external_text(self):
+        """测试目标：验证证据短引只需在案件脱敏全文中逐字存在。
+        准备数据：准备一题引用不存在文本的案件。
         调用函数：调用 check_row。
         预期结果：issues 包含 source_quote 无法定位。
         该断言保护的行为：模型编造或章节标错的证据不能通过正式校验。"""
 
         self.assertEqual(check_row(self.row, self.case), [])
-        bad = {**self.row, "source_evidence": [{"source_section": "judgment", "source_quote": "任某支付货款"}]}
+        bad = {**self.row, "source_evidence": [{"source_quote": "任某支付货款"}]}
         self.assertTrue(any("无法" in issue for issue in check_row(bad, self.case)))
+
+    def test_source_quote_passes_without_section_metadata(self):
+        """案件没有章节元数据时，来源引用仍按脱敏全文逐字校验。"""
+        case = {"case_id": "case_1", "external_text": "事实材料：卢某支付货款。"}
+        row = {**self.row, "source_evidence": [{"source_quote": "卢某支付货款"}]}
+        self.assertEqual(check_row(row, case), [])
+
+    def test_prediction_rejects_quotes_after_all_supported_outcome_markers(self):
+        """预测题的本地安全边界覆盖判决、裁判和裁定结果标志。"""
+        case = {"case_id": "case_1", "external_text": "事实材料。裁判：乙承担责任。"}
+        row = {**self.row, "dimension_id": "judgment_prediction", "task_type": "裁判结果预测",
+               "source_evidence": [{"source_quote": "裁判：乙承担责任。"}]}
+        issues = check_row(row, case)
+        self.assertTrue(any("裁判结果区域" in issue for issue in issues), issues)
+
+    def test_source_evidence_rejects_undefined_fields_generically(self):
+        """正式题目的来源证据只接受当前契约字段，未知字段统一失败。"""
+        bad = {**self.row, "source_evidence": [{"source_quote": "卢某支付货款", "extra_note": "不属于当前契约"}]}
+        issues = check_row(bad, self.case)
+        self.assertTrue(any("source_evidence 包含未定义字段" in issue for issue in issues))
+        self.assertFalse(any("extra_note" in issue for issue in issues))
+
+    def test_source_evidence_schema_rejects_undefined_fields(self):
+        """正式题目证据接口只接受当前契约字段。"""
+        schema_path = Path(__file__).resolve().parents[1] / "methodology" / "01_造Benchmark" / "legal" / "schemas" / "question.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        self.assertFalse(schema["properties"]["source_evidence"]["items"]["additionalProperties"])
 
     def test_context_cannot_be_only_a_copy_of_question(self):
         """验证正式题不能把 question 原样复制成 context。"""

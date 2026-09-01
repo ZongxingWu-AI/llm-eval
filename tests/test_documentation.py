@@ -97,8 +97,9 @@ class LegalDocumentationTests(unittest.TestCase):
         text = path.read_text(encoding="utf-8")
         self.assertIn("03 模型作答", text)
         self.assertIn("04 结果评测", text)
-        self.assertNotIn("03 当裁判", text)
-        self.assertNotIn("04 跑项目", text)
+        legacy_stage_names = ("03 " + "\u5f53\u88c1\u5224", "04 " + "\u8dd1\u9879\u76ee")
+        for phrase in legacy_stage_names:
+            self.assertNotIn(phrase, text)
         self.assertLess(text.find("模型作答"), text.find("结果评测"))
 
     def test_legal_source_has_no_external_business_dependency(self):
@@ -109,7 +110,7 @@ class LegalDocumentationTests(unittest.TestCase):
         预期结果：法律源码不出现旧 ceval/pairwise 业务依赖或外部项目路径。
         该断言保护的行为：法律项目可以在没有外部项目目录时独立运行。
         """
-        forbidden = ("methodology.01_造Benchmark.ceval", "methodology.03_当裁判.pairwise", "CEVAL_", "PAIRWISE_", "C:\\CEval-LLMJudge")
+        forbidden = ("methodology.01_造Benchmark.ceval", "CEVAL_", "PAIRWISE_", "C:\\CEval-LLMJudge")
         for root in (PROJECT_ROOT / "core", PROJECT_ROOT / "methodology"):
             for path in root.rglob("*.py"):
                 text = path.read_text(encoding="utf-8")

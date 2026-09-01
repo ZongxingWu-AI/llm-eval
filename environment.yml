@@ -8,3 +8,4 @@ dependencies:
   - openai
   - python-dotenv
   - openpyxl
+  - pandas

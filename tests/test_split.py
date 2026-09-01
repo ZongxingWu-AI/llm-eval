@@ -17,7 +17,7 @@ class SplitTests(unittest.TestCase):
         """测试目标：验证每类十案按 3/2/5 分配且固定 seed 可重复。
         准备数据：构造五个主分类、每类十个不同 case_id。
         调用函数：两次调用 assign_case_splits。
-        预期结果：两次结果一致，每类 dev=3、calibration=2、test=5。
+        预期结果：两次结果一致，每类 dev=2、calibration=2、test=6。
         该断言保护的行为：正式报告的固定测试集不会随重复构建漂移。"""
 
         cases = [
@@ -44,7 +44,17 @@ class SplitTests(unittest.TestCase):
                 )
                 for split in ("dev", "calibration", "test")
             }
-            self.assertEqual(counts, {"dev": 3, "calibration": 2, "test": 5})
+            self.assertEqual(counts, {"dev": 2, "calibration": 2, "test": 6})
+
+    def test_honors_explicit_split_ratios_at_case_level(self):
+        """验证显式 split_ratios 按案件而非题目数量分配。"""
+        rows = [
+            {"case_id": f"case_{i:02d}", "case_classification": {"primary_category": "合同、准合同纠纷"}}
+            for i in range(10)
+        ]
+        result = assign_case_splits(rows, seed=3, split_ratios={"dev": 0.2, "calibration": 0.2, "test": 0.6})
+        counts = {split: sum(row["split"] == split for row in result) for split in ("dev", "calibration", "test")}
+        self.assertEqual(counts, {"dev": 2, "calibration": 2, "test": 6})
 
     def test_keeps_existing_case_split_for_all_questions(self):
         """测试目标：验证一个案件生成多题时所有题共享案件级 split。
